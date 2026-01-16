@@ -13,6 +13,7 @@ webdriver-manager
 
 # HTTP clients
 httpx[http2]
+h2
 requests
 
 # Date/time parsing
