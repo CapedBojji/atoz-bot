@@ -36,7 +36,7 @@ def create_httpx_async_client(selenium_cookie_list: list[dict]) -> httpx.AsyncCl
     :return: An httpx async client with the cookies set.
     """
     cookie_jar = selenium_cookies_to_cookiejar(selenium_cookie_list)
-    return httpx.AsyncClient(cookies=cookie_jar)
+    return httpx.AsyncClient(cookies=cookie_jar, http2=True)
 
 
 def selenium_cookies_to_cookiejar(selenium_cookies):
