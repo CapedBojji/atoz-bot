@@ -21,7 +21,7 @@ from utils.watcher import load_config
 
 class UserSession:
     def __init__(self, config: UserConfig):
-        self.__client = AsyncClient()
+        self.__client = AsyncClient(http2=True)
         self.__session = None
         self.__employee_id: Optional[int] = None
         self.__config = config
@@ -47,7 +47,7 @@ class UserSession:
         if self.__should_re_login(config):
             # Re-authenticate if the configuration has changed
             # self.__session = requests.Session()
-            self.__client = AsyncClient()
+            self.__client = AsyncClient(http2=True)
             self.__employee_id = None
         self.__config = config
         logging.debug("User session config updated: %s", self.__config)
