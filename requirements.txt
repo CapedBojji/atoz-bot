@@ -1,0 +1,25 @@
+# File monitoring
+watchdog
+
+# TOML configuration parsing
+tomli
+
+# Data class utilities
+dacite
+
+# Web scraping and browser automation
+selenium
+webdriver-manager
+
+# HTTP clients
+httpx
+requests
+
+# Date/time parsing
+parsedatetime
+
+# Microsoft Office 365 integration
+O365
+
+# Environment variable management
+python-dotenv

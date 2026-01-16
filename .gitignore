@@ -1,0 +1,13 @@
+/.venv/
+/config/
+/O365_tokens/
+.env
+app.log
+dist
+build
+.devenv
+*.pyc
+__pycache__/
+.DS_Store
+.direnv/
+main.exe
