@@ -11,7 +11,7 @@ import requests
 from httpx import AsyncClient
 from selenium.webdriver.common.by import By
 
-from app.models import UserConfig, obfuscate_2fa_method, TwoFAMethod
+from config import UserConfig, obfuscate_2fa_method, TwoFAMethod
 from two_factor.outlook import authenticate, get_2fa_code
 from utils.browser import BrowserFirefox, get_2fa_options
 from utils.session import create_httpx_async_client

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from app.session import UserSession
 from utils.nanoid import nanoid
-from utils.time import split_time_block, time_block_in_blocks
+from time import split_time_block, time_block_in_blocks
 
 __pick_shift_window = int(os.getenv("PICK_SHIFT_WINDOW", "120"))
 

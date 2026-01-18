@@ -3,6 +3,7 @@ import json
 import logging
 import pickle
 import time
+import threading
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -11,8 +12,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-from app.models import TwoFAMethod, obfuscate_2fa_method
-from utils.watcher import load_config
+from config import TwoFAMethod, obfuscate_2fa_method, UserConfig
+
+logger = logging.getLogger(__name__)
 from utils.browser import BrowserFirefox, get_2fa_options
 
 
@@ -423,6 +425,30 @@ def _extract_auth_token(cookies: list[dict]) -> Optional[str]:
     return None
 
 
+def _tokens_from_cookies(cookies: list[dict], cookie_path: Path) -> dict:
+    """Build token metadata from cookies, including expiration and cookie path."""
+    access = None
+    refresh = None
+    expires = None
+    for c in cookies:
+        name = c.get("name")
+        if name == "atoz-auth-session":
+            access = c.get("value")
+        elif name == "atoz-refresh-token":
+            refresh = c.get("value")
+        elif name == "refresh_session_expiration":
+            try:
+                expires = int(c.get("value"))
+            except (TypeError, ValueError):
+                expires = None
+    return {
+        "access": access,
+        "refresh": refresh,
+        "expires": expires,
+        "cookie_path": str(cookie_path),
+    }
+
+
 def _load_cookies_into_browser(browser: BrowserFirefox, cookies: list[dict]) -> None:
     """
     Load cookies into the browser session.
@@ -527,34 +553,102 @@ class ConsoleCaptchaHandler(CaptchaHandler):
         logging.debug("Continuing after CAPTCHA resolution")
 
 
-def example_authenticate_laudboat(show_browser: bool = False) -> Optional[str]:
-    """Authenticate using config/laudboat.toml with manual 2FA input."""
-    config_path = Path("config/laudboat.toml")
-    user_config = load_config(config_path)
-    if user_config is None:
-        logging.error(f"Failed to load config from {config_path}")
-        return None
+# ============================================================================
+# Auth management (CLI-friendly helpers)
+# ============================================================================
 
+class AuthRefresher:
+    """Background refresher that renews sessions before expiration using stored cookies."""
+
+    def __init__(self, app_state, cookie_dir: Path, interval_seconds: int = 300):
+        self.app_state = app_state
+        self.cookie_dir = cookie_dir
+        self.interval = interval_seconds
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, name="auth-refresher", daemon=True)
+        self._thread.start()
+        logger.info("Auth refresher started")
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+            logger.info("Auth refresher stopped")
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            try:
+                self._refresh_due_sessions()
+            except Exception as e:
+                logger.error(f"Auth refresher error: {e}", exc_info=True)
+            self._stop_event.wait(self.interval)
+
+    def _refresh_due_sessions(self):
+        tokens: dict = self.app_state.get("tokens", {}) or {}
+        now = int(time.time())
+        for username, tok in tokens.items():
+            exp = tok.get("expires")
+            if exp is None:
+                continue
+            # Refresh only if expiration is within the next 30 minutes
+            if exp <= now:
+                logger.warning(f"Token expired for {username}; full auth required")
+                continue
+            if exp - now <= 1800:
+                cookie_path = Path(tok.get("cookie_path", self.cookie_dir / f"{username}.pkl"))
+                logger.info(f"Refreshing session for {username} (exp in {exp - now} sec)")
+                cookies = _try_reuse_session(username, cookie_path, show_browser=False)
+                if cookies:
+                    token_data = _tokens_from_cookies(cookies, cookie_path)
+                    self.app_state.set(f"tokens.{username}", token_data)
+                else:
+                    logger.error(f"Failed to refresh session for {username} using cookies")
+
+
+def authenticate_user(config: UserConfig, cookie_dir: Path, show_browser: bool = False, manual: bool = False) -> tuple[bool, dict]:
+    """
+    Authenticate a single user and return success plus token info.
+
+    manual flag currently behaves the same as show_browser: opens browser for user interaction.
+    """
+    cookie_dir.mkdir(parents=True, exist_ok=True)
+    cookie_path = cookie_dir / f"{config.username}.pkl"
+
+    # Try reuse first
+    cookies = _try_reuse_session(config.username, cookie_path, show_browser=show_browser or manual)
+    if cookies:
+        token_data = _tokens_from_cookies(cookies, cookie_path)
+        return True, token_data
+
+    # Full login
     two_fa_handler = ConsoleTwoFAHandler()
     captcha_handler = ConsoleCaptchaHandler()
-    cookie_path = Path("cookies") / f"{user_config.username}.pkl"
-
-    token = authenticate(
-        username=user_config.username,
-        password=user_config.password,
-        two_fa_handler=two_fa_handler,
-        captcha_handler=captcha_handler,
-        cookie_path=cookie_path,
-        two_fa_method=user_config.two_factor_method,
-        show_browser=show_browser,
-    )
-
-    if token:
-        print(f"Auth success for {user_config.username}. Token prefix: {token[:12]}...")
-    else:
-        print("Authentication returned no token.")
-    return token
-
-
-if __name__ == "__main__":
-    example_authenticate_laudboat(show_browser=True)
+    browser = BrowserFirefox(headless=not (show_browser or manual))
+    try:
+        browser.start()
+        if manual:
+            cookies = _perform_manual_login(browser, config.username)
+        else:
+            cookies = _perform_full_login(
+                browser,
+                config.username,
+                config.password,
+                two_fa_handler,
+                captcha_handler,
+                config.two_factor_method,
+                is_headless=not (show_browser or manual),
+            )
+        _save_cookies(cookies, cookie_path)
+        token_data = _tokens_from_cookies(cookies, cookie_path)
+        return True, token_data
+    except Exception as e:
+        logger.error(f"Authentication failed for {config.username}: {e}")
+        return False, {}
+    finally:
+        browser.stop()

@@ -6,7 +6,7 @@ with cookie persistence and reuse.
 """
 from pathlib import Path
 from auth import authenticate, CaptchaDetectedError
-from app.models import TwoFAMethod
+from config import TwoFAMethod
 from two_factor.outlook import authenticate as outlook_auth, get_2fa_code
 
 

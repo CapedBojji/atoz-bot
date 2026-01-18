@@ -10,8 +10,8 @@ from watchdog.events import FileSystemEventHandler, FileSystemEvent, FileCreated
     FileDeletedEvent
 from watchdog.observers import Observer
 
-from app.models import UserConfig, TwoFAMethod
-from utils.time import parse_str_to_time, parse_str_to_time_zone, parse_str_to_timedelta
+from config import UserConfig, TwoFAMethod
+from time import parse_str_to_time, parse_str_to_time_zone, parse_str_to_timedelta
 
 
 class Watcher(FileSystemEventHandler):

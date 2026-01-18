@@ -52,6 +52,7 @@
 
             languages.python = {
               enable = true;
+              package = pkgs.python312Full;
               venv = {
                 enable = true;
                 requirements = ./requirements.txt;

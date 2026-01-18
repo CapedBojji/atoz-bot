@@ -24,3 +24,9 @@ O365
 
 # Environment variable management
 python-dotenv
+
+# CLI framework
+cmd2
+
+# TOML parser (additionally to tomli)
+toml
