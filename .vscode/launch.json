@@ -13,12 +13,12 @@
             "args": "${command:pickArgs}"
         },
         {
-            "name": "Python Debugger: main.py -su laudboat",
+            "name": "Python Debugger: main.py -su shamield -sb",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "args": ["-su", "laudboat"]
+            "args": ["-su", "shamield", "-sb"]
         }
     ]
 }
