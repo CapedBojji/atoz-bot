@@ -224,6 +224,8 @@ class UserSession:
         time.sleep(20)
         browser.find_element(By.ID, "code").send_keys(self.__get_2fa_code())
         browser.find_element(By.ID, "buttonVerifyIdentity").click()
+        # Give some time incase of captcha
+        time.sleep(30)
         # Bypass setup Passkey
         browser.find_element(By.CSS_SELECTOR, "button.remind-button[data-target=\"#passkeyConfirmModal\"]").click()
         browser.find_element(By.CSS_SELECTOR, 'button.remind-button[form="passkeyForm"]').click()
