@@ -24,3 +24,6 @@ O365
 
 # Environment variable management
 python-dotenv
+
+# Gmail IMAP 2FA retrieval uses Python stdlib (`imaplib`, `email`), so there is
+# no pip package to add here.

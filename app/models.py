@@ -7,11 +7,17 @@ from zoneinfo import ZoneInfo
 
 class TwoFAMethod(Enum):
     OUTLOOK = "OUTLOOK"
+    GMAIL = "GMAIL"
 
 class SkillType(Enum):
     INBOUND = "Inbound"
     SHIP_DOCK = "Ship Dock"
     SORT = "Sort"
+
+
+@dataclass
+class GmailConfig:
+    app_password: Optional[str] = None
 
 @dataclass
 class ShiftBlockConfig:
@@ -32,6 +38,7 @@ class UserConfig:
     two_factor_method: tuple[TwoFAMethod, str]
     pick_shift_api_config: Optional[PickShiftApiConfig]
     reload_session_on: Optional[datetime]
+    gmail: Optional[GmailConfig] = None
     priority: int = 0
     skills: Optional[List[SkillType]] = None
 
@@ -46,7 +53,6 @@ def obfuscate_2fa_method(string: str, method: TwoFAMethod) -> str:
     :param method: The type of the 2FA method.
     :return: The obfuscated 2FA method.
     """
-    if method == TwoFAMethod.OUTLOOK:
+    if method in (TwoFAMethod.OUTLOOK, TwoFAMethod.GMAIL):
         return string[0] + '*' * (string.index('@') - 1) + string[string.index('@'):]
-    else:
-        raise ValueError(f"Unknown 2FA method type: {method}")
+    raise ValueError(f"Unknown 2FA method type: {method}")

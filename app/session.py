@@ -13,6 +13,7 @@ from selenium.webdriver.common.by import By
 
 from app.models import UserConfig, obfuscate_2fa_method, TwoFAMethod
 from two_factor.outlook import authenticate, get_2fa_code
+from two_factor import gmail
 from utils.browser import BrowserFirefox, get_2fa_options
 from utils.session import create_httpx_async_client
 from utils.time import is_time
@@ -256,6 +257,10 @@ class UserSession:
             if not authenticate(self.__config.two_factor_method[1]):
                 raise ValueError("Failed to authenticate with the 2FA method")
             return get_2fa_code(self.__config.two_factor_method[1])
+        elif method == TwoFAMethod.GMAIL:
+            if self.__config.gmail is None or self.__config.gmail.app_password is None:
+                raise ValueError("Gmail 2FA method requires Gmail configuration with app password")
+            return gmail.get_2fa_code(self.__config.two_factor_method[1], self.__config.gmail.app_password)
         else:
             raise ValueError(f"Unknown 2FA method type: {method}")
 
