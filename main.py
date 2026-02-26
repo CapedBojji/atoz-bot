@@ -95,6 +95,18 @@ def dir_path(path: str) -> Path:
     return p
 
 
+def non_negative_minutes(value: str) -> float:
+    """Argparse type: a non-negative number of minutes (float allowed)."""
+    try:
+        minutes = float(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"{value} is not a valid number of minutes") from e
+
+    if minutes < 0:
+        raise argparse.ArgumentTypeError("start delay minutes must be >= 0")
+    return minutes
+
+
 if __name__ == "__main__":
     dotenv.load_dotenv()
     parser = argparse.ArgumentParser(
@@ -137,6 +149,23 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable debug mode.",
     )
+    parser.add_argument(
+        "--start_delay_minutes",
+        "-sd",
+        type=non_negative_minutes,
+        default=0,
+        help="Delay application start by N minutes.",
+    )
     args = parser.parse_args()
     logging.debug(f"Running with arguments: {args}")
+
+    if args.start_delay_minutes:
+        delay_seconds = args.start_delay_minutes * 60
+        print(f"Delaying start for {args.start_delay_minutes} minute(s)...")
+        try:
+            time.sleep(delay_seconds)
+        except KeyboardInterrupt:
+            print("Startup cancelled.")
+            raise SystemExit(130)
+
     asyncio.run(start(args.config_dir, args.log_file, args.debug, args.show_browser, args.single_user))

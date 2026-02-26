@@ -109,6 +109,57 @@ which firefox
 pip install webdriver-manager
 ```
 
+## Pixi (Windows / cross-platform)
+
+If you’re not using Nix (e.g., on Windows), you can use Pixi to get a reproducible Python environment.
+
+Install Pixi on Windows (one option):
+```powershell
+winget install --id PrefixDev.Pixi -e
+```
+
+### Windows PowerShell
+```powershell
+# From the repo root
+pixi install
+
+# Run the app
+pixi run app
+
+# Pass args to main.py after `--`
+pixi run app -- -su laudboat -sb
+
+# Delay app start by 5 minutes
+pixi run app -- -su laudboat -sb -sd 5
+
+# Optional: enter an activated shell
+pixi shell --shell powershell
+```
+
+### Windows cmd.exe
+```bat
+pixi install
+pixi run app
+pixi run app -- -su laudboat -sb
+
+REM Delay app start by 5 minutes
+pixi run app -- -su laudboat -sb -sd 5
+pixi shell --shell cmd
+```
+
+### Optional environment variables
+
+If GeckoDriver/Firefox aren’t detected automatically on Windows, you can set:
+
+- `GECKODRIVER_PATH` (path to `geckodriver.exe`)
+- `FIREFOX_BIN` (path to `firefox.exe`)
+
+### Note on Gmail / IMAP dependencies
+
+The Gmail 2FA flow in [two_factor/gmail.py](two_factor/gmail.py) uses Python stdlib `imaplib` + `email`, so there’s no separate pip/conda package named “imap” or “gmail” to install.
+
+On Windows, `zoneinfo.ZoneInfo` often needs timezone data; the Pixi env includes `tzdata` to cover that.
+
 ## Migration from Hardcoded Paths
 
 **Before:**
