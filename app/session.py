@@ -248,6 +248,22 @@ class UserSession:
         """
         return self.__client
 
+    async def close(self, logout: bool = False) -> None:
+        """Close network resources held by this session.
+
+        Args:
+            logout: If True, attempt to hit the remote logout endpoint before closing the HTTP client.
+        """
+        if logout:
+            try:
+                await self.logout()
+            except Exception as e:
+                logging.error("Logout failed for %s: %s", self, e)
+        try:
+            await self.__client.aclose()
+        except Exception as e:
+            logging.error("Failed to close httpx client for %s: %s", self, e)
+
     def __get_2fa_code(self) -> str:
         """
         Get the 2FA code from the user.
@@ -362,3 +378,19 @@ async def authenticate_all_sessions(show_browser = False, single_user = None) ->
             logging.error(f"Failed to authenticate session for {session.get_config().username}")
 
     return authenticated
+
+
+async def close_all_sessions(logout: bool = False) -> None:
+    """Close all active sessions.
+
+    This is intended to be called during application shutdown.
+    """
+    sessions = [session for (session, _) in __active_sessions.values()]
+    if not sessions:
+        return
+
+    async with TaskGroup() as group:
+        for session in sessions:
+            group.create_task(session.close(logout=logout))
+
+    __active_sessions.clear()

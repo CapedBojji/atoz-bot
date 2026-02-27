@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 import logging
+import os
+import signal
 import sys
 import time
 from asyncio import TaskGroup
@@ -9,7 +11,7 @@ from pathlib import Path
 
 from api import pick_shifts
 from app.models import UserConfig
-from app.session import get_user_session, delete_user_session, create_user_session, authenticate_all_sessions
+from app.session import get_user_session, delete_user_session, create_user_session, authenticate_all_sessions, close_all_sessions
 from utils.logger import setup_logging
 from utils.watcher import Watcher, load_config
 
@@ -30,7 +32,14 @@ def on_user_config_create(data: UserConfig, path: str) -> None:
     create_user_session(data, Path(path))
 
 
-async def start(config_dir: Path, log_file: Path | None = None, debug: bool = False, show_browser=False, single_user=None) -> None:
+async def start(
+    config_dir: Path,
+    log_file: Path | None = None,
+    debug: bool = False,
+    show_browser: bool = False,
+    single_user: str | None = None,
+    shutdown_after_minutes: float | None = None,
+) -> None:
     """
     Start the application with the given configuration directory.
     :param config_dir: The path to the configuration directory.
@@ -53,10 +62,44 @@ async def start(config_dir: Path, log_file: Path | None = None, debug: bool = Fa
     # Load existing user configurations
     load_existing_user_configs(config_dir)
     # Main loop to keep the application running
-    try:
-        while True:
+    stop_event = asyncio.Event()
+
+    def request_shutdown(reason: str) -> None:
+        if not stop_event.is_set():
+            logging.info("Shutdown requested (%s)", reason)
+            stop_event.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, request_shutdown, sig.name)
+        except (NotImplementedError, RuntimeError):
+            # Some platforms/event loops don't support signal handlers.
+            pass
+
+    if shutdown_after_minutes is None:
+        shutdown_after_minutes_env = os.getenv("SHUTDOWN_AFTER_MINUTES")
+        if shutdown_after_minutes_env:
             try:
-                time.sleep(3)
+                shutdown_after_minutes = float(shutdown_after_minutes_env)
+            except ValueError:
+                logging.warning(
+                    "Invalid SHUTDOWN_AFTER_MINUTES=%r (expected a number); ignoring",
+                    shutdown_after_minutes_env,
+                )
+
+    shutdown_task: asyncio.Task[None] | None = None
+    if shutdown_after_minutes is not None and shutdown_after_minutes > 0:
+        async def _shutdown_timer() -> None:
+            await asyncio.sleep(shutdown_after_minutes * 60)
+            request_shutdown(f"timer:{shutdown_after_minutes}m")
+
+        shutdown_task = asyncio.create_task(_shutdown_timer(), name="shutdown_timer")
+
+    try:
+        while not stop_event.is_set():
+            try:
+                await asyncio.sleep(3)
                 authenticated_sessions = await authenticate_all_sessions(show_browser, single_user)
                 authenticated_sessions.sort(key = lambda x: x.get_config().priority, reverse=True)
                 async with TaskGroup() as group:
@@ -64,12 +107,23 @@ async def start(config_dir: Path, log_file: Path | None = None, debug: bool = Fa
                         group.create_task(pick_shifts.run(session))
             except Exception as e:
                 logging.error(f"Error in TaskGroup: {e}")
-    except KeyboardInterrupt:
-        watcher.stop()
     except Exception as e:
         logging.error(f"An error occurred: {e}")
-        watcher.stop()
-        sys.exit(1)
+        raise
+    finally:
+        try:
+            if shutdown_task:
+                shutdown_task.cancel()
+        except Exception:
+            pass
+        try:
+            watcher.stop()
+        except Exception as e:
+            logging.error("Failed to stop watcher: %s", e)
+        try:
+            await close_all_sessions()
+        except Exception as e:
+            logging.error("Failed to close sessions: %s", e)
 
 
 def load_existing_user_configs(config_dir: Path) -> None:
@@ -156,6 +210,13 @@ if __name__ == "__main__":
         default=0,
         help="Delay application start by N minutes.",
     )
+    parser.add_argument(
+        "--shutdown_after_minutes",
+        "-sam",
+        type=non_negative_minutes,
+        default=0,
+        help="Automatically shut down after N minutes (0 disables). Can also be set via SHUTDOWN_AFTER_MINUTES.",
+    )
     args = parser.parse_args()
     logging.debug(f"Running with arguments: {args}")
 
@@ -168,4 +229,16 @@ if __name__ == "__main__":
             print("Startup cancelled.")
             raise SystemExit(130)
 
-    asyncio.run(start(args.config_dir, args.log_file, args.debug, args.show_browser, args.single_user))
+    try:
+        asyncio.run(
+            start(
+                args.config_dir,
+                args.log_file,
+                args.debug,
+                args.show_browser,
+                args.single_user,
+                shutdown_after_minutes=args.shutdown_after_minutes or None,
+            )
+        )
+    except KeyboardInterrupt:
+        raise SystemExit(130)
