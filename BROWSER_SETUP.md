@@ -109,42 +109,46 @@ which firefox
 pip install webdriver-manager
 ```
 
-## Pixi (Windows / cross-platform)
+## Mise (Windows / cross-platform)
 
-If you’re not using Nix (e.g., on Windows), you can use Pixi to get a reproducible Python environment.
+If you’re not using Nix (e.g., on Windows), you can use Mise to manage Python and project tasks.
 
-Install Pixi on Windows (one option):
+Install Mise on Windows (one option):
 ```powershell
-winget install --id PrefixDev.Pixi -e
+winget install --id jdx.mise -e
 ```
 
 ### Windows PowerShell
 ```powershell
 # From the repo root
-pixi install
+mise install
+
+# Install dependencies
+mise run install
 
 # Run the app
-pixi run app
+mise run app
 
 # Pass args to main.py after `--`
-pixi run app -- -su laudboat -sb
+mise run app -- -su laudboat -sb
 
 # Delay app start by 5 minutes
-pixi run app -- -su laudboat -sb -sd 5
+mise run app -- -su laudboat -sb -sd 5
 
 # Optional: enter an activated shell
-pixi shell --shell powershell
+mise shell
 ```
 
 ### Windows cmd.exe
 ```bat
-pixi install
-pixi run app
-pixi run app -- -su laudboat -sb
+mise install
+mise run install
+mise run app
+mise run app -- -su laudboat -sb
 
 REM Delay app start by 5 minutes
-pixi run app -- -su laudboat -sb -sd 5
-pixi shell --shell cmd
+mise run app -- -su laudboat -sb -sd 5
+mise shell
 ```
 
 ### Optional environment variables
@@ -156,9 +160,9 @@ If GeckoDriver/Firefox aren’t detected automatically on Windows, you can set:
 
 ### Note on Gmail / IMAP dependencies
 
-The Gmail 2FA flow in [two_factor/gmail.py](two_factor/gmail.py) uses Python stdlib `imaplib` + `email`, so there’s no separate pip/conda package named “imap” or “gmail” to install.
+The Gmail 2FA flow in [two_factor/gmail.py](two_factor/gmail.py) uses Python stdlib `imaplib` + `email`, so there’s no separate pip package named “imap” or “gmail” to install.
 
-On Windows, `zoneinfo.ZoneInfo` often needs timezone data; the Pixi env includes `tzdata` to cover that.
+On Windows, `zoneinfo.ZoneInfo` often needs timezone data; `tzdata` is included in [requirements.txt](requirements.txt).
 
 ## Migration from Hardcoded Paths
 

@@ -18,6 +18,7 @@ requests
 
 # Date/time parsing
 parsedatetime
+tzdata
 
 # Microsoft Office 365 integration
 O365
