@@ -23,6 +23,7 @@ class GmailConfig:
 class ShiftBlockConfig:
     start: datetime
     end: datetime
+    priority: int = 0
 
 @dataclass
 class PickShiftApiConfig:

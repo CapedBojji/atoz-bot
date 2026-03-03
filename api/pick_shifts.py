@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from asyncio import TaskGroup, create_task
+from asyncio import TaskGroup
 from datetime import datetime, timezone
 
 from app.session import UserSession
@@ -104,7 +104,7 @@ query FindShiftsPage(
 
         return __filter_out_ineligible_shifts(response_data["data"]["shiftOpportunities"]["opportunities"])
 
-    return await create_task(handle_response())
+    return await handle_response()
 
 
 def __validate_response_data(response: dict) -> bool:
@@ -162,6 +162,37 @@ def __get_shift_time_block(shift: dict) -> tuple[datetime, datetime]:
     return start_time, end_time
 
 
+def __shift_sort_key(shift: dict) -> tuple[datetime, datetime, str]:
+    start_time, end_time = __get_shift_time_block(shift)
+
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+    else:
+        start_time = start_time.astimezone(timezone.utc)
+
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
+    else:
+        end_time = end_time.astimezone(timezone.utc)
+
+    return start_time, end_time, str(shift.get("id", ""))
+
+
+def __get_shift_rule_priority(
+    shift: dict,
+    rules: list[tuple[datetime, datetime, int]],
+) -> int | None:
+    start_time, end_time = __get_shift_time_block(shift)
+    best_priority: int | None = None
+
+    for rule_start, rule_end, rule_priority in rules:
+        if start_time >= rule_start and end_time <= rule_end:
+            if best_priority is None or rule_priority > best_priority:
+                best_priority = rule_priority
+
+    return best_priority
+
+
 async def __pick_shift(session: UserSession, shift: dict) -> bool:
     """
     Pick the given shift.
@@ -203,7 +234,7 @@ mutation AddShift($shiftOpportunityId: AddShiftInput!) {
 
         return True
 
-    return await create_task(handle_response())
+    return await handle_response()
 
 
 def __validate_pick_shift_response(response: dict, shift: dict) -> bool:
@@ -231,16 +262,20 @@ async def run(session: UserSession):
     logging.debug(f"Running pick shift for {session.get_config().username}")
 
     rules = session.get_config().pick_shift_api_config.rules
-    # Convert rules to list tuple of datetime objects
-    rules = [(rule.start, rule.end) for rule in rules]
-    # Update the rules to use the user's timezone
-    rules = [(rule[0].replace(tzinfo=session.get_config().pick_shift_api_config.time_zone or timezone.utc),
-              rule[1].replace(tzinfo=session.get_config().pick_shift_api_config.time_zone or timezone.utc)) for rule in rules]
+    # Convert rules to (start, end, priority) and apply configured timezone
+    rules = [
+        (
+            rule.start.replace(tzinfo=session.get_config().pick_shift_api_config.time_zone or timezone.utc),
+            rule.end.replace(tzinfo=session.get_config().pick_shift_api_config.time_zone or timezone.utc),
+            int(getattr(rule, "priority", 0)),
+        )
+        for rule in rules
+    ]
     # Get the minimum start time and maximum end time from the rules
     min_start = min([rule[0] for rule in rules])
     max_end = max([rule[1] for rule in rules])
-    # Split into time blocks of max 7 days
-    time_blocks = split_time_block(min_start, max_end, 7)
+    # Split into time blocks of max 14 days
+    time_blocks = split_time_block(min_start, max_end, 14)
 
     # Get the shifts for each time block
     all_shifts = []
@@ -255,14 +290,21 @@ async def run(session: UserSession):
         all_shifts += result.result()
 
     # Remove duplicates
-    all_shifts = {shift["id"]: shift for shift in all_shifts}.values()
+    all_shifts = list({shift["id"]: shift for shift in all_shifts}.values())
+
+    # Sort by rule priority (desc) then by start time (asc)
+    eligible_shifts: list[tuple[int, dict]] = []
+    for shift in all_shifts:
+        priority = __get_shift_rule_priority(shift, rules)
+        if priority is None:
+            continue
+        eligible_shifts.append((priority, shift))
+
+    eligible_shifts.sort(key=lambda item: (-item[0], *__shift_sort_key(item[1])))
 
     # Process each shift
     async with TaskGroup() as group:
-        for shift in all_shifts:
-            start_time, end_time = __get_shift_time_block(shift)
-            # Check if the shift is within any of the rules
-            if time_block_in_blocks((start_time, end_time), rules):
-                logging.debug(f"Picking shift: {shift}")
-                group.create_task(__pick_shift(session, shift))
+        for priority, shift in eligible_shifts:
+            logging.debug(f"Picking shift (priority={priority}): {shift}")
+            group.create_task(__pick_shift(session, shift))
 
