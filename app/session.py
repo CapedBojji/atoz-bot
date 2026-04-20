@@ -4,6 +4,7 @@ import pathlib
 import re
 import time
 from asyncio import TaskGroup
+from dataclasses import dataclass
 from os import PathLike
 from typing import Optional
 
@@ -15,9 +16,15 @@ from app.models import UserConfig, obfuscate_2fa_method, TwoFAMethod
 from two_factor.outlook import authenticate, get_2fa_code
 from two_factor import gmail
 from utils.browser import BrowserFirefox, get_2fa_options
-from utils.session import create_httpx_async_client
+from utils.session import create_httpx_async_client, clone_httpx_async_client
 from utils.time import is_time
 from utils.watcher import load_config
+
+
+@dataclass
+class JobSession:
+    client: AsyncClient
+    employee_id: int
 
 
 class UserSession:
@@ -26,6 +33,8 @@ class UserSession:
         self.__session = None
         self.__employee_id: Optional[int] = None
         self.__config = config
+        self.__auth_lock = asyncio.Lock()
+        self.__employee_id_lock = asyncio.Lock()
 
     def get_config(self) -> UserConfig:
         """
@@ -64,7 +73,12 @@ class UserSession:
         """
         Get the employee ID from the session.
         """
-        if self.__employee_id is None:
+        if self.__employee_id is not None:
+            return self.__employee_id
+
+        async with self.__employee_id_lock:
+            if self.__employee_id is not None:
+                return self.__employee_id
             # Fetch the employee ID from the session
             url = "https://atoz.amazon.work/shifts"
 
@@ -88,6 +102,10 @@ class UserSession:
         """
         Authenticate the user session.
         """
+        async with self.__auth_lock:
+            return await self.__authenticate_unlocked(show_browser)
+
+    async def __authenticate_unlocked(self, show_browser: bool = False) -> bool:
         if self.__is_session_valid() and not self.__is_session_expired():
             return True
         elif self.__is_session_valid() and self.__is_session_expired():
@@ -105,6 +123,24 @@ class UserSession:
             self.__client = create_httpx_async_client(selenium_cookie_list=cookies)
             # Check if the session is valid
             return self.__is_session_valid()
+
+    async def create_job_session(self) -> JobSession:
+        """
+        Create an isolated authenticated client for a single job run.
+        """
+        async with self.__auth_lock:
+            is_authenticated = await self.__authenticate_unlocked(False)
+            if not is_authenticated:
+                raise RuntimeError(f"Failed to authenticate session for {self.__config.username}")
+
+            client = clone_httpx_async_client(self.__client)
+
+        employee_id = await self.get_employee_id()
+        if employee_id is None:
+            await client.aclose()
+            raise RuntimeError(f"Failed to resolve employee id for {self.__config.username}")
+
+        return JobSession(client=client, employee_id=employee_id)
 
     def __is_session_valid(self) -> bool:
         """
@@ -204,10 +240,10 @@ class UserSession:
         browser.find_element(By.ID, "associate-login-input").send_keys(self.__config.username)
         browser.find_element(By.ID, "login-form-login-btn").click()
         # Wait for workforce page to load
-        browser.wait_for_url("workforce")
-        # Enter username again
-        browser.find_element(By.ID, "input-id-4").send_keys(self.__config.username)
-        browser.find_element(By.CSS_SELECTOR, '[data-testid="submit-username-button"]').click()
+        # browser.wait_for_url("workforce")
+        # # Enter username again
+        # browser.find_element(By.ID, "input-id-4").send_keys(self.__config.username)
+        # browser.find_element(By.CSS_SELECTOR, '[data-testid="submit-username-button"]').click()
         # Enter password
         browser.wait_for_url("SAML2/Unsolicited/SSO")
         browser.find_element(By.ID, "password").send_keys(self.__config.password)

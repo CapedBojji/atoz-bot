@@ -26,19 +26,20 @@ class ShiftBlockConfig:
     priority: int = 0
 
 @dataclass
-class PickShiftApiConfig:
+class JobConfig:
     time_to_pick: Optional[datetime]
     time_zone: Optional[ZoneInfo]
     rules: list[ShiftBlockConfig]
     duration: timedelta = timedelta(hours=1)
+    name: Optional[str] = None
 
 @dataclass
 class UserConfig:
     username: str
     password: str
     two_factor_method: tuple[TwoFAMethod, str]
-    pick_shift_api_config: Optional[PickShiftApiConfig]
-    reload_session_on: Optional[datetime]
+    reload_session_on: Optional[datetime] = None
+    jobs: Optional[List[JobConfig]] = None
     gmail: Optional[GmailConfig] = None
     priority: int = 0
     skills: Optional[List[SkillType]] = None

@@ -39,7 +39,8 @@ async def start(
     show_browser: bool = False,
     single_user: str | None = None,
     shutdown_after_minutes: float | None = None,
-) -> None:
+    relaunch_after_minutes: float | None = None,
+) -> str | None:
     """
     Start the application with the given configuration directory.
     :param config_dir: The path to the configuration directory.
@@ -63,9 +64,12 @@ async def start(
     load_existing_user_configs(config_dir)
     # Main loop to keep the application running
     stop_event = asyncio.Event()
+    shutdown_reason: str | None = None
 
     def request_shutdown(reason: str) -> None:
+        nonlocal shutdown_reason
         if not stop_event.is_set():
+            shutdown_reason = reason
             logging.info("Shutdown requested (%s)", reason)
             stop_event.set()
 
@@ -89,12 +93,20 @@ async def start(
                 )
 
     shutdown_task: asyncio.Task[None] | None = None
+    relaunch_task: asyncio.Task[None] | None = None
     if shutdown_after_minutes is not None and shutdown_after_minutes > 0:
         async def _shutdown_timer() -> None:
             await asyncio.sleep(shutdown_after_minutes * 60)
-            request_shutdown(f"timer:{shutdown_after_minutes}m")
+            request_shutdown(f"shutdown_timer:{shutdown_after_minutes}m")
 
         shutdown_task = asyncio.create_task(_shutdown_timer(), name="shutdown_timer")
+
+    if relaunch_after_minutes is not None and relaunch_after_minutes > 0:
+        async def _relaunch_timer() -> None:
+            await asyncio.sleep(relaunch_after_minutes * 60)
+            request_shutdown(f"relaunch_timer:{relaunch_after_minutes}m")
+
+        relaunch_task = asyncio.create_task(_relaunch_timer(), name="relaunch_timer")
 
     try:
         while not stop_event.is_set():
@@ -114,6 +126,8 @@ async def start(
         try:
             if shutdown_task:
                 shutdown_task.cancel()
+            if relaunch_task:
+                relaunch_task.cancel()
         except Exception:
             pass
         try:
@@ -124,6 +138,8 @@ async def start(
             await close_all_sessions()
         except Exception as e:
             logging.error("Failed to close sessions: %s", e)
+
+    return shutdown_reason
 
 
 def load_existing_user_configs(config_dir: Path) -> None:
@@ -217,6 +233,13 @@ if __name__ == "__main__":
         default=0,
         help="Automatically shut down after N minutes (0 disables). Can also be set via SHUTDOWN_AFTER_MINUTES.",
     )
+    parser.add_argument(
+        "--relaunch_every_minutes",
+        "-rem",
+        type=non_negative_minutes,
+        default=0,
+        help="Relaunch the app every N minutes (0 disables).",
+    )
     args = parser.parse_args()
     logging.debug(f"Running with arguments: {args}")
 
@@ -229,16 +252,56 @@ if __name__ == "__main__":
             print("Startup cancelled.")
             raise SystemExit(130)
 
+    effective_shutdown_after_minutes: float | None = args.shutdown_after_minutes or None
+    if effective_shutdown_after_minutes is None:
+        shutdown_after_minutes_env = os.getenv("SHUTDOWN_AFTER_MINUTES")
+        if shutdown_after_minutes_env:
+            try:
+                env_minutes = float(shutdown_after_minutes_env)
+                if env_minutes > 0:
+                    effective_shutdown_after_minutes = env_minutes
+                else:
+                    logging.info(
+                        "Ignoring SHUTDOWN_AFTER_MINUTES=%r because it is <= 0",
+                        shutdown_after_minutes_env,
+                    )
+            except ValueError:
+                logging.warning(
+                    "Invalid SHUTDOWN_AFTER_MINUTES=%r (expected a number); ignoring",
+                    shutdown_after_minutes_env,
+                )
+
+    shutdown_deadline: float | None = None
+    if effective_shutdown_after_minutes is not None:
+        shutdown_deadline = time.monotonic() + (effective_shutdown_after_minutes * 60)
+
     try:
-        asyncio.run(
-            start(
-                args.config_dir,
-                args.log_file,
-                args.debug,
-                args.show_browser,
-                args.single_user,
-                shutdown_after_minutes=args.shutdown_after_minutes or None,
+        while True:
+            shutdown_for_this_run: float | None = 0
+            if shutdown_deadline is not None:
+                remaining_seconds = shutdown_deadline - time.monotonic()
+                if remaining_seconds <= 0:
+                    print("Shutdown timer reached. Exiting.")
+                    break
+                shutdown_for_this_run = remaining_seconds / 60
+
+            shutdown_reason = asyncio.run(
+                start(
+                    args.config_dir,
+                    args.log_file,
+                    args.debug,
+                    args.show_browser,
+                    args.single_user,
+                    shutdown_after_minutes=shutdown_for_this_run,
+                    relaunch_after_minutes=args.relaunch_every_minutes or None,
+                )
             )
-        )
+
+            if not args.relaunch_every_minutes:
+                break
+            if not shutdown_reason or not shutdown_reason.startswith("relaunch_timer:"):
+                break
+
+            print(f"Relaunching app after {args.relaunch_every_minutes} minute(s)...")
     except KeyboardInterrupt:
         raise SystemExit(130)

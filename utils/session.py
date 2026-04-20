@@ -1,5 +1,5 @@
-import http.cookies
 import logging
+from copy import copy
 from http.cookiejar import CookieJar, Cookie
 
 import httpx
@@ -37,6 +37,20 @@ def create_httpx_async_client(selenium_cookie_list: list[dict]) -> httpx.AsyncCl
     """
     cookie_jar = selenium_cookies_to_cookiejar(selenium_cookie_list)
     return httpx.AsyncClient(cookies=cookie_jar, http2=True)
+
+
+def clone_httpx_async_client(client: httpx.AsyncClient) -> httpx.AsyncClient:
+    """
+    Clone an authenticated httpx client into a new isolated async client.
+    """
+    return httpx.AsyncClient(cookies=copy_cookie_jar(client.cookies.jar), http2=True)
+
+
+def copy_cookie_jar(cookie_jar: CookieJar) -> CookieJar:
+    cloned_jar = CookieJar()
+    for cookie in cookie_jar:
+        cloned_jar.set_cookie(copy(cookie))
+    return cloned_jar
 
 
 def selenium_cookies_to_cookiejar(selenium_cookies):
