@@ -18,6 +18,8 @@ from utils.watcher import Watcher, load_config
 
 import dotenv
 
+__poll_interval_seconds = max(0.1, float(os.getenv("PICK_POLL_INTERVAL_SECONDS", "0.1")))
+
 def on_user_config_change(data: UserConfig, path: str) -> None:
     session = get_user_session(data, Path(path))
     session.update_config(data)
@@ -111,14 +113,19 @@ async def start(
     try:
         while not stop_event.is_set():
             try:
-                await asyncio.sleep(3)
+                await asyncio.sleep(__poll_interval_seconds)
                 authenticated_sessions = await authenticate_all_sessions(show_browser, single_user)
                 authenticated_sessions.sort(key = lambda x: x.get_config().priority, reverse=True)
                 async with TaskGroup() as group:
                     for session in authenticated_sessions:
                         group.create_task(pick_shifts.run(session))
             except Exception as e:
-                logging.error(f"Error in TaskGroup: {e}")
+                if isinstance(e, ExceptionGroup):
+                    logging.error("Error in TaskGroup: %s", e)
+                    for idx, sub_exc in enumerate(e.exceptions, start=1):
+                        logging.exception("TaskGroup sub-exception #%d", idx, exc_info=sub_exc)
+                else:
+                    logging.exception("Error in TaskGroup")
     except Exception as e:
         logging.error(f"An error occurred: {e}")
         raise

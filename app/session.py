@@ -16,7 +16,7 @@ from app.models import UserConfig, obfuscate_2fa_method, TwoFAMethod
 from two_factor.outlook import authenticate, get_2fa_code
 from two_factor import gmail
 from utils.browser import BrowserFirefox, get_2fa_options
-from utils.session import create_httpx_async_client, clone_httpx_async_client
+from utils.session import create_httpx_async_client
 from utils.time import is_time
 from utils.watcher import load_config
 
@@ -25,6 +25,7 @@ from utils.watcher import load_config
 class JobSession:
     client: AsyncClient
     employee_id: int
+    owns_client: bool = False
 
 
 class UserSession:
@@ -126,21 +127,22 @@ class UserSession:
 
     async def create_job_session(self) -> JobSession:
         """
-        Create an isolated authenticated client for a single job run.
+        Create an authenticated job session.
+
+        For low-latency picking we reuse the warm shared HTTP client so
+        we keep existing HTTP/2 connections instead of reconnecting per job.
         """
         async with self.__auth_lock:
             is_authenticated = await self.__authenticate_unlocked(False)
             if not is_authenticated:
                 raise RuntimeError(f"Failed to authenticate session for {self.__config.username}")
-
-            client = clone_httpx_async_client(self.__client)
+            client = self.__client
 
         employee_id = await self.get_employee_id()
         if employee_id is None:
-            await client.aclose()
             raise RuntimeError(f"Failed to resolve employee id for {self.__config.username}")
 
-        return JobSession(client=client, employee_id=employee_id)
+        return JobSession(client=client, employee_id=employee_id, owns_client=False)
 
     def __is_session_valid(self) -> bool:
         """

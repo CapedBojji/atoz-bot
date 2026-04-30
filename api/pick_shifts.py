@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import asyncio
 from asyncio import TaskGroup
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,9 +12,9 @@ from app.models import JobConfig
 from app.session import JobSession
 from app.session import UserSession
 from utils.nanoid import nanoid
-from utils.time import split_time_block, time_block_in_blocks
+from utils.time import split_time_block
 
-__pick_shift_window = int(os.getenv("PICK_SHIFT_WINDOW", "120"))
+__pick_time_block_days = int(os.getenv("PICK_TIME_BLOCK_DAYS", "14"))
 
 
 @dataclass
@@ -141,11 +142,13 @@ def __validate_response_data(response: dict) -> bool:
     :param response: The response data to validate.
     :return: True if the response data is valid, False otherwise.
     """
-    if not "data" in response and "shiftOpportunities" in response["data"]:
+    if "data" not in response:
         return False
-    if not "opportunities" in response["data"]["shiftOpportunities"]:
+    if "shiftOpportunities" not in response["data"]:
         return False
-    if not "counts" in response["data"]["shiftOpportunities"]:
+    if "opportunities" not in response["data"]["shiftOpportunities"]:
+        return False
+    if "counts" not in response["data"]["shiftOpportunities"]:
         return False
     return True
 
@@ -246,23 +249,30 @@ mutation AddShift($shiftOpportunityId: AddShiftInput!) {
     }
     url = f"https://atoz-api-us-east-1.amazon.work/graphql?{context.employee_id}"
 
+    started_at = time.perf_counter()
     response = await context.client.post(url, headers=headers, json=data)
+    latency_ms = (time.perf_counter() - started_at) * 1000
 
     async def handle_response():
         if response.status_code != 200:
             return False
 
-        response_data = response.json()
+        try:
+            response_data = response.json()
+        except ValueError:
+            return False
+
         if not __validate_pick_shift_response(response_data, shift):
             return False
 
         start_time, end_time = __get_shift_time_block(shift)
         logging.info(
-            "%s picked shift id=%s start=%s end=%s",
+            "%s picked shift id=%s start=%s end=%s latency_ms=%.0f",
             __job_label(context),
             shift["id"],
             start_time.isoformat(),
             end_time.isoformat(),
+            latency_ms,
         )
 
         return True
@@ -277,67 +287,64 @@ def __validate_pick_shift_response(response: dict, shift: dict) -> bool:
     :param shift: The shift that was picked.
     :return: True if the response data is valid, False otherwise.
     """
-    if not "data" in response and not "addShift" in response["data"]:
+    if not isinstance(response, dict):
         return False
 
-    return response["data"]["addShift"] == shift["id"]
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return False
+    if "addShift" not in data:
+        return False
+
+    return data["addShift"] == shift["id"]
 
 
-async def __run_job(session: UserSession, job: JobConfig, job_index: int) -> None:
-    job_session: JobSession | None = None
-    try:
-        job_session = await session.create_job_session()
-        context = JobRunnerContext(
-            client=job_session.client,
-            employee_id=job_session.employee_id,
-            job=job,
-            username=session.get_config().username,
-            job_index=job_index,
+async def __run_job(session: UserSession, job_session: JobSession, job: JobConfig, job_index: int) -> None:
+    context = JobRunnerContext(
+        client=job_session.client,
+        employee_id=job_session.employee_id,
+        job=job,
+        username=session.get_config().username,
+        job_index=job_index,
+    )
+
+    rules = [
+        (
+            rule.start.replace(tzinfo=job.time_zone or timezone.utc),
+            rule.end.replace(tzinfo=job.time_zone or timezone.utc),
+            int(getattr(rule, "priority", 0)),
         )
+        for rule in job.rules
+    ]
+    if not rules:
+        return
 
-        rules = [
-            (
-                rule.start.replace(tzinfo=job.time_zone or timezone.utc),
-                rule.end.replace(tzinfo=job.time_zone or timezone.utc),
-                int(getattr(rule, "priority", 0)),
-            )
-            for rule in job.rules
-        ]
-        if not rules:
-            return
+    min_start = min([rule[0] for rule in rules])
+    max_end = max([rule[1] for rule in rules])
+    time_blocks = split_time_block(min_start, max_end, __pick_time_block_days)
 
-        min_start = min([rule[0] for rule in rules])
-        max_end = max([rule[1] for rule in rules])
-        time_blocks = split_time_block(min_start, max_end, 14)
+    # Start pick attempts as soon as each search block returns,
+    # instead of waiting for all search requests to complete.
+    fetch_tasks = []
+    for time_block in time_blocks:
+        start_time_str = time_block[0].astimezone(timezone.utc).isoformat()
+        end_time_str = time_block[1].astimezone(timezone.utc).isoformat()
+        fetch_tasks.append(asyncio.create_task(__get_shifts(context, start_time_str, end_time_str)))
 
-        all_shifts = []
-        results = []
-        async with TaskGroup() as group:
-            for time_block in time_blocks:
-                start_time_str = time_block[0].astimezone(timezone.utc).isoformat()
-                end_time_str = time_block[1].astimezone(timezone.utc).isoformat()
-                results.append(group.create_task(__get_shifts(context, start_time_str, end_time_str)))
+    seen_shift_ids: set[str] = set()
+    async with TaskGroup() as group:
+        for completed in asyncio.as_completed(fetch_tasks):
+            shifts = await completed
+            for shift in shifts:
+                shift_id = str(shift["id"])
+                if shift_id in seen_shift_ids:
+                    continue
+                seen_shift_ids.add(shift_id)
 
-        for result in results:
-            all_shifts += result.result()
-
-        all_shifts = list({shift["id"]: shift for shift in all_shifts}.values())
-
-        eligible_shifts: list[tuple[int, dict]] = []
-        for shift in all_shifts:
-            priority = __get_shift_rule_priority(shift, rules)
-            if priority is None:
-                continue
-            eligible_shifts.append((priority, shift))
-
-        eligible_shifts.sort(key=lambda item: (-item[0], *__shift_sort_key(item[1])))
-
-        async with TaskGroup() as group:
-            for priority, shift in eligible_shifts:
+                priority = __get_shift_rule_priority(shift, rules)
+                if priority is None:
+                    continue
                 group.create_task(__pick_shift(context, shift))
-    finally:
-        if job_session is not None:
-            await job_session.client.aclose()
 
 
 async def run(session: UserSession):
@@ -349,9 +356,11 @@ async def run(session: UserSession):
     if not jobs:
         return
 
+    job_session = await session.create_job_session()
+
     async with TaskGroup() as group:
         for job_index, job in enumerate(jobs, start=1):
             if not __can_pick_shift(job):
                 continue
-            group.create_task(__run_job(session, job, job_index))
+            group.create_task(__run_job(session, job_session, job, job_index))
 
