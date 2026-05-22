@@ -339,11 +339,12 @@ async def __run_job(session: UserSession, job_session: JobSession, job: JobConfi
                 shift_id = str(shift["id"])
                 if shift_id in seen_shift_ids:
                     continue
-                seen_shift_ids.add(shift_id)
 
                 priority = __get_shift_rule_priority(shift, rules)
                 if priority is None:
                     continue
+
+                seen_shift_ids.add(shift_id)
                 group.create_task(__pick_shift(context, shift))
 
 

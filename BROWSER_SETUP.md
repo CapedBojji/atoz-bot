@@ -109,54 +109,12 @@ which firefox
 pip install webdriver-manager
 ```
 
-## Mise (Windows / cross-platform)
-
-If you’re not using Nix (e.g., on Windows), you can use Mise to manage Python and project tasks.
-
-Install Mise on Windows (one option):
-```powershell
-winget install --id jdx.mise -e
-```
-
-### Windows PowerShell
-```powershell
-# From the repo root
-mise install
-
-# Install dependencies
-mise run install
-
-# Run the app
-mise run app
-
-# Pass args to main.py after `--`
-mise run app -- -su laudboat -sb
-
-# Delay app start by 5 minutes
-mise run app -- -su laudboat -sb -sd 5
-
-# Optional: enter an activated shell
-mise shell
-```
-
-### Windows cmd.exe
-```bat
-mise install
-mise run install
-mise run app
-mise run app -- -su laudboat -sb
-
-REM Delay app start by 5 minutes
-mise run app -- -su laudboat -sb -sd 5
-mise shell
-```
-
 ### Optional environment variables
 
-If GeckoDriver/Firefox aren’t detected automatically on Windows, you can set:
+If GeckoDriver/Firefox aren’t detected automatically, you can set:
 
-- `GECKODRIVER_PATH` (path to `geckodriver.exe`)
-- `FIREFOX_BIN` (path to `firefox.exe`)
+- `GECKODRIVER_PATH` (path to geckodriver binary)
+- `FIREFOX_BIN` (path to firefox binary)
 
 ### Note on Gmail / IMAP dependencies
 

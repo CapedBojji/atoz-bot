@@ -18,7 +18,22 @@ from utils.watcher import Watcher, load_config
 
 import dotenv
 
-__poll_interval_seconds = max(0.1, float(os.getenv("PICK_POLL_INTERVAL_SECONDS", "0.1")))
+dotenv.load_dotenv()
+
+
+def _get_poll_interval_seconds() -> float:
+    raw_value = os.getenv("PICK_POLL_INTERVAL_SECONDS", "1")
+    try:
+        return max(0.0, float(raw_value))
+    except ValueError:
+        logging.warning(
+            "Invalid PICK_POLL_INTERVAL_SECONDS=%r (expected a number); using 1 second",
+            raw_value,
+        )
+        return 1.0
+
+
+__poll_interval_seconds = _get_poll_interval_seconds()
 
 def on_user_config_change(data: UserConfig, path: str) -> None:
     session = get_user_session(data, Path(path))
@@ -58,12 +73,13 @@ async def start(
         - config_dir: %s
         - log_file: %s
         - debug: %s
-    """, config_dir, log_file, debug)
+        - poll_interval_seconds: %.3f
+    """, config_dir, log_file, debug, __poll_interval_seconds)
     # Initialize the directory watcher
     watcher = Watcher(config_dir, on_user_config_change, on_user_config_create, on_user_config_delete)
     watcher.start()
     # Load existing user configurations
-    load_existing_user_configs(config_dir)
+    load_existing_user_configs(config_dir, single_user=single_user)
     # Main loop to keep the application running
     stop_event = asyncio.Event()
     shutdown_reason: str | None = None
@@ -149,9 +165,11 @@ async def start(
     return shutdown_reason
 
 
-def load_existing_user_configs(config_dir: Path) -> None:
+def load_existing_user_configs(config_dir: Path, single_user: str | None = None) -> None:
     configs = config_dir.rglob("*.toml")
     for config in configs:
+        if single_user is not None and config.stem != single_user:
+            continue
         logging.debug(f"Loading existing config file: {config}")
         data = load_config(config)
         if data:
@@ -185,7 +203,6 @@ def non_negative_minutes(value: str) -> float:
 
 
 if __name__ == "__main__":
-    dotenv.load_dotenv()
     parser = argparse.ArgumentParser(
         prog="AtoZ Client",
         description="AtoZ Client is a command line tool for AtoZ.",
