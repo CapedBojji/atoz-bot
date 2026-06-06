@@ -18,7 +18,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "args": ["-su", "laudboat"]
+            "args": ["-su", "laudboat", "-sb"]
         }
     ]
 }
