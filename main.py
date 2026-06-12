@@ -55,6 +55,7 @@ async def start(
     debug: bool = False,
     show_browser: bool = False,
     single_user: str | None = None,
+    manual_login: bool = False,
     shutdown_after_minutes: float | None = None,
     relaunch_after_minutes: float | None = None,
 ) -> str | None:
@@ -65,6 +66,7 @@ async def start(
     :param debug: Enable debug mode.
     :param show_browser: Show the browser window.
     :param single_user: If provided, only this user's config will be used.
+    :param manual_login: Prompt the user to complete login manually in a visible browser.
     """
     # Initialize the logger
     setup_logging(log_file, level=logging.DEBUG if debug else logging.INFO)
@@ -73,8 +75,9 @@ async def start(
         - config_dir: %s
         - log_file: %s
         - debug: %s
+        - manual_login: %s
         - poll_interval_seconds: %.3f
-    """, config_dir, log_file, debug, __poll_interval_seconds)
+    """, config_dir, log_file, debug, manual_login, __poll_interval_seconds)
     # Initialize the directory watcher
     watcher = Watcher(config_dir, on_user_config_change, on_user_config_create, on_user_config_delete)
     watcher.start()
@@ -130,11 +133,11 @@ async def start(
         while not stop_event.is_set():
             try:
                 await asyncio.sleep(__poll_interval_seconds)
-                authenticated_sessions = await authenticate_all_sessions(show_browser, single_user)
+                authenticated_sessions = await authenticate_all_sessions(show_browser, single_user, manual_login=manual_login)
                 authenticated_sessions.sort(key = lambda x: x.get_config().priority, reverse=True)
                 async with TaskGroup() as group:
                     for session in authenticated_sessions:
-                        group.create_task(pick_shifts.run(session))
+                        group.create_task(pick_shifts.run(session, manual_login=manual_login))
             except Exception as e:
                 if isinstance(e, ExceptionGroup):
                     logging.error("Error in TaskGroup: %s", e)
@@ -223,6 +226,13 @@ if __name__ == "__main__":
         help="Show the browser window.",
     )
     parser.add_argument(
+        "--manual_login",
+        "-ml",
+        default=False,
+        action="store_true",
+        help="Open a visible browser and wait for Enter after manual login. Ignores start delay.",
+    )
+    parser.add_argument(
         "--single_user",
         "-su",
         default=None,
@@ -267,7 +277,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     logging.debug(f"Running with arguments: {args}")
 
-    if args.start_delay_minutes:
+    if args.start_delay_minutes and args.manual_login:
+        print("Manual login enabled; ignoring start delay.")
+    elif args.start_delay_minutes:
         delay_seconds = args.start_delay_minutes * 60
         print(f"Delaying start for {args.start_delay_minutes} minute(s)...")
         try:
@@ -316,6 +328,7 @@ if __name__ == "__main__":
                     args.debug,
                     args.show_browser,
                     args.single_user,
+                    args.manual_login,
                     shutdown_after_minutes=shutdown_for_this_run,
                     relaunch_after_minutes=args.relaunch_every_minutes or None,
                 )

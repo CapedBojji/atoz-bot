@@ -99,33 +99,37 @@ class UserSession:
 
         return self.__employee_id
 
-    async def authenticate(self, show_browser=False) -> bool:
+    async def authenticate(self, show_browser=False, manual_login: bool = False) -> bool:
         """
         Authenticate the user session.
         """
         async with self.__auth_lock:
-            return await self.__authenticate_unlocked(show_browser)
+            return await self.__authenticate_unlocked(show_browser, manual_login=manual_login)
 
-    async def __authenticate_unlocked(self, show_browser: bool = False) -> bool:
+    async def __authenticate_unlocked(self, show_browser: bool = False, manual_login: bool = False) -> bool:
         if self.__is_session_valid() and not self.__is_session_expired():
             return True
-        elif self.__is_session_valid() and self.__is_session_expired():
+        elif self.__is_session_valid() and self.__is_session_expired() and not manual_login:
             return await self.__re_authenticate()
         else:
-            browser = BrowserFirefox(headless=not show_browser)
+            browser = BrowserFirefox(headless=not (show_browser or manual_login))
             # Perform the login process
             try:
-                cookies = await asyncio.to_thread(self.__login, browser)
+                if manual_login:
+                    cookies = await asyncio.to_thread(self.__manual_login, browser)
+                else:
+                    cookies = await asyncio.to_thread(self.__login, browser)
             except Exception as e:
                 logging.error(f"Failed to login: {e}")
                 browser.stop()
                 return False
             # Create a new session with the cookies
             self.__client = create_httpx_async_client(selenium_cookie_list=cookies)
+            self.__employee_id = None
             # Check if the session is valid
             return self.__is_session_valid()
 
-    async def create_job_session(self) -> JobSession:
+    async def create_job_session(self, manual_login: bool = False) -> JobSession:
         """
         Create an authenticated job session.
 
@@ -133,7 +137,7 @@ class UserSession:
         we keep existing HTTP/2 connections instead of reconnecting per job.
         """
         async with self.__auth_lock:
-            is_authenticated = await self.__authenticate_unlocked(False)
+            is_authenticated = await self.__authenticate_unlocked(False, manual_login=manual_login)
             if not is_authenticated:
                 raise RuntimeError(f"Failed to authenticate session for {self.__config.username}")
             client = self.__client
@@ -227,6 +231,40 @@ class UserSession:
             return False
 
         return True
+
+    def __manual_login(self, browser: BrowserFirefox) -> list:
+        logging.debug("Performing manual login for user session %s", self)
+        browser.start()
+        if browser.driver is None:
+            raise RuntimeError("Browser driver did not start")
+        browser.driver.get("https://atoz-login.amazon.work/")
+
+        print(
+            f"\nManual login required for {self.__config.username}.\n"
+            "Complete the login in the browser window, then press Enter here to continue.",
+            flush=True,
+        )
+
+        while True:
+            input()
+            cookies = browser.get_cookies()
+            if self.__selenium_cookies_have_required_auth(cookies):
+                browser.stop()
+                return cookies
+
+            print(
+                "Login cookies were not detected yet. Finish logging in, then press Enter again.",
+                flush=True,
+            )
+
+    def __selenium_cookies_have_required_auth(self, cookies: list[dict]) -> bool:
+        cookie_names = {cookie.get("name") for cookie in cookies}
+        return {
+            "atoz-oauth-token",
+            "atoz-refresh-token",
+            "atoz-auth-session",
+        }.issubset(cookie_names)
+
     def __login(self, browser: BrowserFirefox) -> list:
         logging.debug("Performing login for user session %s", self)
         """
@@ -374,7 +412,7 @@ def reload_user_session(session: UserSession) -> None:
     else:
         logging.warning("Attempting to reload session for %s, but session doesn't exist", username)
 
-async def authenticate_all_sessions(show_browser = False, single_user = None) -> list[UserSession]:
+async def authenticate_all_sessions(show_browser = False, single_user = None, manual_login: bool = False) -> list[UserSession]:
     """
     Authenticate all user sessions.
     This method will iterate through all active sessions and authenticate them.
@@ -389,7 +427,7 @@ async def authenticate_all_sessions(show_browser = False, single_user = None) ->
         # Check to see if session needs to be reloaded
         if session.get_config().reload_session_on is not None and is_time(session.get_config().reload_session_on):
             reload_user_session(session)
-        results[session] = await session.authenticate(show_browser)
+        results[session] = await session.authenticate(show_browser, manual_login=manual_login)
         if results[session]:
             authenticated.append(session)
             logging.debug(f"Authenticated session for {session.get_config().username}")
@@ -403,13 +441,18 @@ async def authenticate_all_sessions(show_browser = False, single_user = None) ->
         if session.get_config().reload_session_on is not None and is_time(session.get_config().reload_session_on):
             reload_user_session(session)
 
-    async with TaskGroup() as group:
+    if manual_login:
         for (session, _) in __active_sessions.values():
-            # Create a task for each session
-            results[session] = group.create_task(session.authenticate(show_browser))
+            results[session] = await session.authenticate(show_browser, manual_login=True)
+    else:
+        async with TaskGroup() as group:
+            for (session, _) in __active_sessions.values():
+                # Create a task for each session
+                results[session] = group.create_task(session.authenticate(show_browser))
 
-    for session, task in results.items():
-        if task.result():
+    for session, result in results.items():
+        is_authenticated = result.result() if isinstance(result, asyncio.Task) else result
+        if is_authenticated:
             authenticated.append(session)
             logging.debug(f"Authenticated session for {session.get_config().username}")
         else:

@@ -348,20 +348,20 @@ async def __run_job(session: UserSession, job_session: JobSession, job: JobConfi
                 group.create_task(__pick_shift(context, shift))
 
 
-async def run(session: UserSession):
+async def run(session: UserSession, manual_login: bool = False):
     """
     Run the pick shift process for the given session.
     :param session: The user session to run the pick shift process for.
+    :param manual_login: Use manual browser login if the session needs authentication.
     """
     jobs = session.get_config().jobs or []
     if not jobs:
         return
 
-    job_session = await session.create_job_session()
+    job_session = await session.create_job_session(manual_login=manual_login)
 
     async with TaskGroup() as group:
         for job_index, job in enumerate(jobs, start=1):
             if not __can_pick_shift(job):
                 continue
             group.create_task(__run_job(session, job_session, job, job_index))
-
