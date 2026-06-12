@@ -94,6 +94,15 @@ def load_config(path: Path) -> UserConfig | None:
                 data=tomli.load(f),
                 config=config
             )
+            if data.manual_login:
+                if not data.username:
+                    data.username = path.stem
+            elif not data.username or not data.password or data.two_factor_method is None:
+                logging.error(
+                    "Config %s must include username, password, and two_factor_method unless manual_login = true",
+                    path,
+                )
+                return None
 
             return data
         except Exception as e:

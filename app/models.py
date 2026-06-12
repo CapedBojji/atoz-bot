@@ -35,9 +35,10 @@ class JobConfig:
 
 @dataclass
 class UserConfig:
-    username: str
-    password: str
-    two_factor_method: tuple[TwoFAMethod, str]
+    username: Optional[str] = None
+    password: Optional[str] = None
+    two_factor_method: Optional[tuple[TwoFAMethod, str]] = None
+    manual_login: bool = False
     reload_session_on: Optional[datetime] = None
     jobs: Optional[List[JobConfig]] = None
     gmail: Optional[GmailConfig] = None

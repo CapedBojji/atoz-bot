@@ -67,8 +67,12 @@ class UserSession:
         """
         Check if the session should be re-logged in based on the new configuration.
         """
-        return self.__config.username != new_config.username or self.__config.password != new_config.password or self.__config.two_factor_method[0] != new_config.two_factor_method[0] or \
-            self.__config.two_factor_method[1] != new_config.two_factor_method[1]
+        return (
+            self.__config.username != new_config.username
+            or self.__config.password != new_config.password
+            or self.__config.two_factor_method != new_config.two_factor_method
+            or self.__config.manual_login != new_config.manual_login
+        )
 
     async def get_employee_id(self) -> int | None:
         """
@@ -103,6 +107,7 @@ class UserSession:
         """
         Authenticate the user session.
         """
+        manual_login = manual_login or self.__config.manual_login
         async with self.__auth_lock:
             return await self.__authenticate_unlocked(show_browser, manual_login=manual_login)
 
@@ -136,6 +141,7 @@ class UserSession:
         For low-latency picking we reuse the warm shared HTTP client so
         we keep existing HTTP/2 connections instead of reconnecting per job.
         """
+        manual_login = manual_login or self.__config.manual_login
         async with self.__auth_lock:
             is_authenticated = await self.__authenticate_unlocked(False, manual_login=manual_login)
             if not is_authenticated:
@@ -273,6 +279,9 @@ class UserSession:
         This method should handle the actual login logic, including
         entering the username and password, and handling two-factor authentication.
         """
+        if not self.__config.username or not self.__config.password or self.__config.two_factor_method is None:
+            raise ValueError("Automated login requires username, password, and two_factor_method")
+
         browser.start()
         # Open the login page
         browser.get_url("https://atoz-login.amazon.work/")
@@ -344,6 +353,9 @@ class UserSession:
         """
         Get the 2FA code from the user.
         """
+        if self.__config.two_factor_method is None:
+            raise ValueError("2FA method is required for automated login")
+
         method = self.__config.two_factor_method[0]
         if method == TwoFAMethod.OUTLOOK:
             if not authenticate(self.__config.two_factor_method[1]):
@@ -427,7 +439,8 @@ async def authenticate_all_sessions(show_browser = False, single_user = None, ma
         # Check to see if session needs to be reloaded
         if session.get_config().reload_session_on is not None and is_time(session.get_config().reload_session_on):
             reload_user_session(session)
-        results[session] = await session.authenticate(show_browser, manual_login=manual_login)
+        session_manual_login = manual_login or session.get_config().manual_login
+        results[session] = await session.authenticate(show_browser, manual_login=session_manual_login)
         if results[session]:
             authenticated.append(session)
             logging.debug(f"Authenticated session for {session.get_config().username}")
@@ -441,9 +454,14 @@ async def authenticate_all_sessions(show_browser = False, single_user = None, ma
         if session.get_config().reload_session_on is not None and is_time(session.get_config().reload_session_on):
             reload_user_session(session)
 
-    if manual_login:
+    any_manual_login = manual_login or any(
+        session.get_config().manual_login for (session, _) in __active_sessions.values()
+    )
+
+    if any_manual_login:
         for (session, _) in __active_sessions.values():
-            results[session] = await session.authenticate(show_browser, manual_login=True)
+            session_manual_login = manual_login or session.get_config().manual_login
+            results[session] = await session.authenticate(show_browser, manual_login=session_manual_login)
     else:
         async with TaskGroup() as group:
             for (session, _) in __active_sessions.values():
