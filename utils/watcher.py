@@ -94,6 +94,14 @@ def load_config(path: Path) -> UserConfig | None:
                 data=tomli.load(f),
                 config=config
             )
+            # Weekdays are parsed independently. On Monday, for example, the
+            # parser can resolve "Monday" to next week and "Tuesday" to
+            # tomorrow. Keep overnight and cross-week windows chronological.
+            for job in data.jobs or []:
+                for rule in job.rules:
+                    while rule.end <= rule.start:
+                        rule.end += datetime.timedelta(days=7)
+
             if data.manual_login:
                 if not data.username:
                     data.username = path.stem
