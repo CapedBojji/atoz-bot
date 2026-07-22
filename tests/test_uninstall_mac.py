@@ -47,9 +47,10 @@ class MacUninstallTests(unittest.TestCase):
             check=True,
         )
 
-    def create_app_install(self, fake_home: Path) -> tuple[Path, Path, Path]:
+    def create_app_install(self, fake_home: Path) -> tuple[Path, Path, Path, Path]:
         install_dir = fake_home / "atoz-bot"
         launcher_path = fake_home / "Desktop" / "Run AtoZ Bot.command"
+        mac_app_path = fake_home / "Applications" / "AtoZ Bot.app"
         manifest_path = fake_home / ".atozbot-install-manifest"
 
         (install_dir / "config").mkdir(parents=True)
@@ -59,37 +60,43 @@ class MacUninstallTests(unittest.TestCase):
         (install_dir / "app.log").write_text("log")
         launcher_path.parent.mkdir()
         launcher_path.write_text("launcher")
+        (mac_app_path / "Contents" / "MacOS").mkdir(parents=True)
+        (mac_app_path / "Contents" / "MacOS" / "AtoZ Bot").write_text("app")
         manifest_path.write_text(
-            f"project:{install_dir}\nlauncher:{launcher_path}\n",
+            f"project:{install_dir}\n"
+            f"launcher:{launcher_path}\n"
+            f"mac-app:{mac_app_path}\n",
             encoding="utf-8",
         )
-        return install_dir, launcher_path, manifest_path
+        return install_dir, launcher_path, mac_app_path, manifest_path
 
     def test_removes_app_private_data_launcher_and_manifest(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_home, environment = self.make_environment(temp_dir)
-            install_dir, launcher_path, manifest_path = self.create_app_install(
-                fake_home
+            install_dir, launcher_path, mac_app_path, manifest_path = (
+                self.create_app_install(fake_home)
             )
 
             result = self.run_uninstaller(environment, "\n")
 
             self.assertFalse(install_dir.exists())
             self.assertFalse(launcher_path.exists())
+            self.assertFalse(mac_app_path.exists())
             self.assertFalse(manifest_path.exists())
             self.assertIn("No setup-owned items remain tracked", result.stdout)
 
     def test_kept_project_stays_tracked_for_future_cleanup(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_home, environment = self.make_environment(temp_dir)
-            install_dir, launcher_path, manifest_path = self.create_app_install(
-                fake_home
+            install_dir, launcher_path, mac_app_path, manifest_path = (
+                self.create_app_install(fake_home)
             )
 
             result = self.run_uninstaller(environment, "no\n")
 
             self.assertTrue(install_dir.exists())
             self.assertFalse(launcher_path.exists())
+            self.assertFalse(mac_app_path.exists())
             self.assertEqual(
                 manifest_path.read_text(encoding="utf-8"),
                 f"project:{install_dir}\n",
@@ -99,14 +106,15 @@ class MacUninstallTests(unittest.TestCase):
     def test_dry_run_removes_nothing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_home, environment = self.make_environment(temp_dir)
-            install_dir, launcher_path, manifest_path = self.create_app_install(
-                fake_home
+            install_dir, launcher_path, mac_app_path, manifest_path = (
+                self.create_app_install(fake_home)
             )
 
             result = self.run_uninstaller(environment, "\n", "--dry-run")
 
             self.assertTrue(install_dir.exists())
             self.assertTrue(launcher_path.exists())
+            self.assertTrue(mac_app_path.exists())
             self.assertTrue(manifest_path.exists())
             self.assertIn("Dry run complete. Nothing was removed", result.stdout)
 

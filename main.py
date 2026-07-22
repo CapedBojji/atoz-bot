@@ -86,6 +86,7 @@ async def start(
     # Main loop to keep the application running
     stop_event = asyncio.Event()
     shutdown_reason: str | None = None
+    bot_ready_announced = False
 
     def request_shutdown(reason: str) -> None:
         nonlocal shutdown_reason
@@ -134,6 +135,9 @@ async def start(
             try:
                 await asyncio.sleep(__poll_interval_seconds)
                 authenticated_sessions = await authenticate_all_sessions(show_browser, single_user, manual_login=manual_login)
+                if authenticated_sessions and not bot_ready_announced:
+                    print("ATOZ_EVENT:BOT_RUNNING", flush=True)
+                    bot_ready_announced = True
                 authenticated_sessions.sort(key = lambda x: x.get_config().priority, reverse=True)
                 async with TaskGroup() as group:
                     for session in authenticated_sessions:

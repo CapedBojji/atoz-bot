@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 INSTALL_DIR="${ATOZ_INSTALL_DIR:-${HOME}/atoz-bot}"
 LAUNCHER_PATH="${ATOZ_LAUNCHER_PATH:-${HOME}/Desktop/Run AtoZ Bot.command}"
+MAC_APP_PATH="${ATOZ_MAC_APP_PATH:-${HOME}/Applications/AtoZ Bot.app}"
 MISE_BIN="${ATOZ_MISE_BIN:-${HOME}/.local/bin/mise}"
 MISE_DATA_DIR="${ATOZ_MISE_DATA_DIR:-${HOME}/.local/share/mise}"
 MISE_CACHE_DIR="${ATOZ_MISE_CACHE_DIR:-${HOME}/Library/Caches/mise}"
@@ -114,6 +115,7 @@ validate_paths() {
   fi
   reject_broad_path "install" "${INSTALL_DIR}"
   reject_broad_path "launcher" "${LAUNCHER_PATH}"
+  reject_broad_path "mac app" "${MAC_APP_PATH}"
   reject_broad_path "mise binary" "${MISE_BIN}"
   reject_broad_path "mise data" "${MISE_DATA_DIR}"
   reject_broad_path "mise cache" "${MISE_CACHE_DIR}"
@@ -142,6 +144,20 @@ remove_launcher() {
     fi
   else
     info "Desktop launcher was not found."
+    unmark_installed "${manifest_item}"
+  fi
+}
+
+remove_mac_application() {
+  local manifest_item="mac-app:${MAC_APP_PATH}"
+  if [ -e "${MAC_APP_PATH}" ]; then
+    info "Removing AtoZ Bot.app."
+    run rm -rf "${MAC_APP_PATH}"
+    if [ "${DRY_RUN}" = "no" ] && [ ! -e "${MAC_APP_PATH}" ]; then
+      unmark_installed "${manifest_item}"
+    fi
+  else
+    info "AtoZ Bot.app was not found."
     unmark_installed "${manifest_item}"
   fi
 }
@@ -319,6 +335,7 @@ main() {
   parse_args "$@"
   require_macos
   validate_paths
+  remove_mac_application
   remove_launcher
   remove_mise_python
   remove_mise_data

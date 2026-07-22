@@ -4,7 +4,8 @@ set -Eeuo pipefail
 REPO_URL="https://github.com/CapedBojji/atoz-bot.git"
 ARCHIVE_URL="https://github.com/CapedBojji/atoz-bot/archive/refs/heads/main.zip"
 INSTALL_DIR="${HOME}/atoz-bot"
-LAUNCHER_PATH="${HOME}/Desktop/Run AtoZ Bot.command"
+MAC_APP_PATH="${HOME}/Applications/AtoZ Bot.app"
+LEGACY_LAUNCHER_PATH="${HOME}/Desktop/Run AtoZ Bot.command"
 PYTHON_TOOL="python@3.12"
 MANIFEST_PATH="${HOME}/.atozbot-install-manifest"
 
@@ -40,6 +41,21 @@ mark_installed() {
   touch "${MANIFEST_PATH}"
   if ! grep -qx "${item}" "${MANIFEST_PATH}"; then
     printf '%s\n' "${item}" >> "${MANIFEST_PATH}"
+  fi
+}
+
+unmark_installed() {
+  local item="$1"
+  local manifest_temp
+  if [ ! -f "${MANIFEST_PATH}" ]; then
+    return
+  fi
+  manifest_temp="${MANIFEST_PATH}.tmp.$$"
+  grep -Fvx "${item}" "${MANIFEST_PATH}" > "${manifest_temp}" || true
+  if [ -s "${manifest_temp}" ]; then
+    mv "${manifest_temp}" "${MANIFEST_PATH}"
+  else
+    rm -f "${manifest_temp}" "${MANIFEST_PATH}"
   fi
 }
 
@@ -189,66 +205,29 @@ install_python_environment() {
   run .venv/bin/python -c 'import PySide6; print("Config builder GUI ready.")'
 }
 
-create_interactive_config() {
-  info "Creating a bot config."
+create_mac_application() {
+  info "Creating AtoZ Bot.app."
   mkdir -p "${INSTALL_DIR}/config"
-  run "${INSTALL_DIR}/.venv/bin/python" \
-    "${INSTALL_DIR}/scripts/config-builder.py" \
-    --config-dir "${INSTALL_DIR}/config"
+  run /bin/bash "${INSTALL_DIR}/scripts/create-mac-app.sh" \
+    --project-dir "${INSTALL_DIR}" \
+    --app-path "${MAC_APP_PATH}"
+  mark_installed "mac-app:${MAC_APP_PATH}"
 }
 
-create_launcher() {
-  info "Creating desktop launcher."
-  mkdir -p "${HOME}/Desktop"
+migrate_legacy_launcher() {
+  local manifest_item="launcher:${LEGACY_LAUNCHER_PATH}"
+  if [ -e "${LEGACY_LAUNCHER_PATH}" ] \
+    && [ -f "${MANIFEST_PATH}" ] \
+    && grep -Fqx "${manifest_item}" "${MANIFEST_PATH}"; then
+    info "Removing old desktop command launcher."
+    run rm -f "${LEGACY_LAUNCHER_PATH}"
+    unmark_installed "${manifest_item}"
+  fi
+}
 
-  cat > "${LAUNCHER_PATH}" <<'LAUNCHER'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-PROJECT_DIR="${HOME}/atoz-bot"
-
-if [ -x "/opt/homebrew/bin/brew" ]; then
-  eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [ -x "/usr/local/bin/brew" ]; then
-  eval "$(/usr/local/bin/brew shellenv)"
-fi
-
-cd "${PROJECT_DIR}"
-
-if [ ! -x ".venv/bin/python" ]; then
-  echo "Python environment is missing. Run setup-mac.sh again."
-  read -r -p "Press Enter to close..."
-  exit 1
-fi
-
-if ! command -v brew >/dev/null 2>&1; then
-  echo "Homebrew is missing from PATH. Run setup-mac.sh again."
-  read -r -p "Press Enter to close..."
-  exit 1
-fi
-
-export GECKODRIVER_PATH="$(brew --prefix)/bin/geckodriver"
-if [ -x "/Applications/Firefox.app/Contents/MacOS/firefox" ]; then
-  export FIREFOX_BIN="/Applications/Firefox.app/Contents/MacOS/firefox"
-fi
-
-set +e
-".venv/bin/python" main.py --manual_login --config_dir config
-status=$?
-set -e
-
-if [ "${status}" -ne 0 ]; then
-  echo
-  echo "AtoZ Bot stopped with an error."
-  read -r -p "Press Enter to close..."
-fi
-
-exit "${status}"
-LAUNCHER
-
-  chmod +x "${LAUNCHER_PATH}"
-  mark_installed "launcher:${LAUNCHER_PATH}"
-  info "Created ${LAUNCHER_PATH}."
+open_mac_application() {
+  info "Opening AtoZ Bot."
+  run /usr/bin/open "${MAC_APP_PATH}"
 }
 
 main() {
@@ -257,11 +236,12 @@ main() {
   install_brew_packages
   clone_or_update_repo
   install_python_environment
-  create_interactive_config
-  create_launcher
+  create_mac_application
+  migrate_legacy_launcher
+  open_mac_application
 
   info "Setup complete."
-  printf 'To run the bot later, double-click: %s\n' "${LAUNCHER_PATH}"
+  printf 'To run the bot later, open: %s\n' "${MAC_APP_PATH}"
   printf 'To uninstall later, run: %s/scripts/uninstall-mac.sh\n' "${INSTALL_DIR}"
   printf 'To preview cleanup first, run: %s/scripts/uninstall-mac.sh --dry-run\n' "${INSTALL_DIR}"
 }
