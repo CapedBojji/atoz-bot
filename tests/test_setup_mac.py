@@ -26,6 +26,13 @@ class MacSetupTests(unittest.TestCase):
         self.assertIn("pip install -r requirements.txt", setup_text)
         self.assertIn("import PySide6", setup_text)
 
+    def test_setup_tracks_launcher_and_mise_python_ownership(self):
+        setup_text = SETUP_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn('mise where "${PYTHON_TOOL}"', setup_text)
+        self.assertIn('mark_installed "mise-tool:${PYTHON_TOOL}"', setup_text)
+        self.assertIn('mark_installed "launcher:${LAUNCHER_PATH}"', setup_text)
+
     def test_setup_passes_absolute_app_config_folder(self):
         setup_text = SETUP_SCRIPT.read_text(encoding="utf-8")
 

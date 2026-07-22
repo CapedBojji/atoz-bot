@@ -174,7 +174,15 @@ install_python_environment() {
   info "Installing Python 3.12 with mise."
   cd "${INSTALL_DIR}"
 
+  local python_already_installed="no"
+  if mise where "${PYTHON_TOOL}" >/dev/null 2>&1; then
+    python_already_installed="yes"
+  fi
+
   run mise install -y "${PYTHON_TOOL}"
+  if [ "${python_already_installed}" = "no" ]; then
+    mark_installed "mise-tool:${PYTHON_TOOL}"
+  fi
   run mise exec -y "${PYTHON_TOOL}" -- python -m venv .venv
   run .venv/bin/python -m pip install --upgrade pip setuptools wheel
   run .venv/bin/python -m pip install -r requirements.txt
@@ -239,6 +247,7 @@ exit "${status}"
 LAUNCHER
 
   chmod +x "${LAUNCHER_PATH}"
+  mark_installed "launcher:${LAUNCHER_PATH}"
   info "Created ${LAUNCHER_PATH}."
 }
 
@@ -254,6 +263,7 @@ main() {
   info "Setup complete."
   printf 'To run the bot later, double-click: %s\n' "${LAUNCHER_PATH}"
   printf 'To uninstall later, run: %s/scripts/uninstall-mac.sh\n' "${INSTALL_DIR}"
+  printf 'To preview cleanup first, run: %s/scripts/uninstall-mac.sh --dry-run\n' "${INSTALL_DIR}"
 }
 
 main "$@"
