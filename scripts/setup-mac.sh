@@ -2,9 +2,11 @@
 set -Eeuo pipefail
 
 REPO_URL="https://github.com/CapedBojji/atoz-bot.git"
+ARCHIVE_URL="https://github.com/CapedBojji/atoz-bot/archive/refs/heads/main.zip"
 INSTALL_DIR="${HOME}/atoz-bot"
 LAUNCHER_PATH="${HOME}/Desktop/Run AtoZ Bot.command"
 PYTHON_TOOL="python@3.12"
+MANIFEST_PATH="${HOME}/.atozbot-install-manifest"
 
 trap 'printf "\nSetup hit an error near line %s. You can re-run this installer after fixing the issue.\n" "$LINENO" >&2' ERR
 
@@ -25,6 +27,20 @@ fail() {
 run() {
   printf '+ %s\n' "$*"
   "$@"
+}
+
+command_works() {
+  local command_name="$1"
+  command -v "${command_name}" >/dev/null 2>&1 && "${command_name}" --version >/dev/null 2>&1
+}
+
+mark_installed() {
+  local item="$1"
+  mkdir -p "$(dirname "${MANIFEST_PATH}")"
+  touch "${MANIFEST_PATH}"
+  if ! grep -qx "${item}" "${MANIFEST_PATH}"; then
+    printf '%s\n' "${item}" >> "${MANIFEST_PATH}"
+  fi
 }
 
 require_macos() {
@@ -62,12 +78,72 @@ install_homebrew_if_needed() {
 }
 
 install_brew_packages() {
-  info "Installing command line tools with Homebrew."
+  info "Checking required tools."
   run brew update
-  run brew install git mise geckodriver
 
-  info "Installing Firefox with Homebrew."
-  run brew install --cask firefox || warn "Firefox may already be installed. Continuing."
+  if command_works git; then
+    info "git is already available."
+  else
+    info "Installing git."
+    run brew install git
+    mark_installed "brew:git"
+  fi
+
+  if [ -x "${HOME}/.local/bin/mise" ]; then
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
+
+  if command_works mise; then
+    info "mise is already available."
+  else
+    info "Installing mise."
+    run brew install mise
+    mark_installed "brew:mise"
+  fi
+
+  if command_works geckodriver; then
+    info "geckodriver is already available."
+  else
+    info "Installing geckodriver."
+    run brew install geckodriver
+    mark_installed "brew:geckodriver"
+  fi
+
+  if [ -d "/Applications/Firefox.app" ] || [ -d "${HOME}/Applications/Firefox.app" ]; then
+    info "Firefox is already installed."
+  else
+    info "Installing Firefox."
+    run brew install --cask firefox
+    mark_installed "brew-cask:firefox"
+  fi
+}
+
+download_repo_archive() {
+  local temp_dir
+  local archive_path
+  local extracted_dir
+
+  temp_dir="$(mktemp -d)"
+  archive_path="${temp_dir}/atoz-bot.zip"
+
+  run curl -fL "${ARCHIVE_URL}" -o "${archive_path}"
+  run ditto -x -k "${archive_path}" "${temp_dir}"
+  extracted_dir="$(find "${temp_dir}" -maxdepth 1 -type d -name 'atoz-bot-*' | head -n 1)"
+  if [ -z "${extracted_dir}" ]; then
+    rm -rf "${temp_dir}"
+    fail "could not unpack the AtoZ Bot download."
+  fi
+
+  mkdir -p "${INSTALL_DIR}"
+  run rsync -a --delete \
+    --exclude '.git' \
+    --exclude '.venv' \
+    --exclude 'config' \
+    --exclude 'app.log' \
+    --exclude '.env' \
+    "${extracted_dir}/" "${INSTALL_DIR}/"
+
+  rm -rf "${temp_dir}"
 }
 
 clone_or_update_repo() {
@@ -80,11 +156,18 @@ clone_or_update_repo() {
     return
   fi
 
-  if [ -e "${INSTALL_DIR}" ]; then
-    fail "${INSTALL_DIR} already exists but is not a git checkout. Move it aside and re-run this script."
+  if [ ! -e "${INSTALL_DIR}" ]; then
+    run git clone "${REPO_URL}" "${INSTALL_DIR}"
+    mark_installed "project:${INSTALL_DIR}"
+    return
   fi
 
-  run git clone "${REPO_URL}" "${INSTALL_DIR}"
+  if [ ! -f "${INSTALL_DIR}/main.py" ]; then
+    fail "${INSTALL_DIR} already exists but does not look like AtoZ Bot. Move it aside and re-run this script."
+  fi
+
+  info "Updating non-git install at ${INSTALL_DIR} from a GitHub zip download."
+  download_repo_archive
 }
 
 install_python_environment() {
@@ -97,126 +180,10 @@ install_python_environment() {
   run .venv/bin/python -m pip install -r requirements.txt
 }
 
-prompt_default() {
-  local prompt_text="$1"
-  local default_value="$2"
-  local reply
-
-  if [ -n "${default_value}" ]; then
-    read -r -p "${prompt_text} [${default_value}]: " reply
-    printf '%s' "${reply:-$default_value}"
-  else
-    read -r -p "${prompt_text}: " reply
-    printf '%s' "${reply}"
-  fi
-}
-
-prompt_required() {
-  local prompt_text="$1"
-  local reply
-
-  while true; do
-    reply="$(prompt_default "${prompt_text}" "")"
-    if [ -n "${reply}" ]; then
-      printf '%s' "${reply}"
-      return
-    fi
-    printf 'Please enter a value.\n'
-  done
-}
-
-toml_escape() {
-  local value="$1"
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  printf '%s' "${value}"
-}
-
-sanitize_config_name() {
-  local value="$1"
-  value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]_-')"
-  if [ -z "${value}" ]; then
-    value="friend"
-  fi
-  printf '%s' "${value}"
-}
-
 create_interactive_config() {
   info "Creating a bot config."
-  mkdir -p "${INSTALL_DIR}/config"
-
-  local raw_name
-  local config_name
-  local config_file
-  raw_name="$(prompt_default "Config name, used for the file name" "friend")"
-  config_name="$(sanitize_config_name "${raw_name}")"
-  config_file="${INSTALL_DIR}/config/${config_name}.toml"
-
-  if [ -f "${config_file}" ]; then
-    local overwrite
-    overwrite="$(prompt_default "${config_file} already exists. Overwrite it? Type yes or no" "no")"
-    case "${overwrite}" in
-      yes|YES|y|Y) ;;
-      *)
-        info "Keeping existing config at ${config_file}."
-        return
-        ;;
-    esac
-  fi
-
-  local time_zone
-  local pick_start
-  local job_name
-  local duration
-  time_zone="$(prompt_default "Timezone" "America/New_York")"
-  job_name="$(prompt_default "Job name" "Default shift search")"
-  pick_start="$(prompt_default "When should picking start? Leave blank for immediate" "")"
-  duration="$(prompt_default "How long should this job run once started? Use minutes or HH:MM" "60")"
-
-  local starts=()
-  local ends=()
-  local add_more="yes"
-  local start_window
-  local end_window
-
-  while true; do
-    start_window="$(prompt_required "Desired shift window start, for example sunday at 6:00 AM")"
-    end_window="$(prompt_required "Desired shift window end, for example sunday at 6:15 PM")"
-    starts+=("${start_window}")
-    ends+=("${end_window}")
-
-    add_more="$(prompt_default "Add another desired shift window? Type yes or no" "no")"
-    case "${add_more}" in
-      yes|YES|y|Y) ;;
-      *) break ;;
-    esac
-  done
-
-  {
-    printf '# Generated by scripts/setup-mac.sh\n'
-    printf 'manual_login = true\n\n'
-    printf '[[jobs]]\n'
-    printf 'name = "%s"\n' "$(toml_escape "${job_name}")"
-    printf 'time_zone = "%s"\n' "$(toml_escape "${time_zone}")"
-    printf 'duration = "%s"\n' "$(toml_escape "${duration}")"
-    if [ -n "${pick_start}" ]; then
-      printf 'time_to_pick = "%s"\n' "$(toml_escape "${pick_start}")"
-    fi
-    printf '\n'
-
-    local index
-    index=0
-    while [ "${index}" -lt "${#starts[@]}" ]; do
-      printf '[[jobs.rules]]\n'
-      printf 'start = "%s"\n' "$(toml_escape "${starts[$index]}")"
-      printf 'end = "%s"\n' "$(toml_escape "${ends[$index]}")"
-      printf 'priority = 0\n\n'
-      index=$((index + 1))
-    done
-  } > "${config_file}"
-
-  chmod 600 "${config_file}"
-  info "Wrote ${config_file}."
+  cd "${INSTALL_DIR}"
+  run .venv/bin/python scripts/config-builder.py --config-dir config
 }
 
 create_launcher() {
@@ -283,6 +250,7 @@ main() {
 
   info "Setup complete."
   printf 'To run the bot later, double-click: %s\n' "${LAUNCHER_PATH}"
+  printf 'To uninstall later, run: %s/scripts/uninstall-mac.sh\n' "${INSTALL_DIR}"
 }
 
 main "$@"
