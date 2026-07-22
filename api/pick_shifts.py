@@ -211,11 +211,31 @@ def __get_shift_rule_priority(
     shift: dict,
     rules: list[tuple[datetime, datetime, int]],
 ) -> int | None:
-    start_time, end_time = __get_shift_time_block(shift)
+    try:
+        start_time, end_time = __get_shift_time_block(shift)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    # A shift is eligible only when its complete, positive-duration time block
+    # fits inside a rule. Overlap alone is intentionally not enough.
+    try:
+        invalid_duration = start_time >= end_time
+    except TypeError:
+        return None
+    if invalid_duration:
+        return None
+
     best_priority: int | None = None
 
     for rule_start, rule_end, rule_priority in rules:
-        if start_time >= rule_start and end_time <= rule_end:
+        if rule_start >= rule_end:
+            continue
+        try:
+            contained = start_time >= rule_start and end_time <= rule_end
+        except TypeError:
+            # Do not guess a timezone for malformed API timestamps.
+            continue
+        if contained:
             if best_priority is None or rule_priority > best_priority:
                 best_priority = rule_priority
 

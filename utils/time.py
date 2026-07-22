@@ -10,7 +10,7 @@ def parse_str_to_time(string: str, timezone = timezone.utc) -> datetime:
     :param timezone: The timezone to use for the datetime object.
     :return: A datetime object.
     """
-    cal = parsedatetime.Calendar()
+    cal = parsedatetime.Calendar(version=parsedatetime.VERSION_CONTEXT_STYLE)
     time, _ = cal.parse(string)
     return datetime(*time[:6], tzinfo=timezone)
 
