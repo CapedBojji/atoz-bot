@@ -26,5 +26,8 @@ O365
 # Environment variable management
 python-dotenv
 
+# Native config builder GUI (installed into the app's private virtual environment)
+PySide6-Essentials>=6.8,<7
+
 # Gmail IMAP 2FA retrieval uses Python stdlib (`imaplib`, `email`), so there is
 # no pip package to add here.

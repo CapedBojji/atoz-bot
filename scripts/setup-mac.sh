@@ -178,12 +178,15 @@ install_python_environment() {
   run mise exec -y "${PYTHON_TOOL}" -- python -m venv .venv
   run .venv/bin/python -m pip install --upgrade pip setuptools wheel
   run .venv/bin/python -m pip install -r requirements.txt
+  run .venv/bin/python -c 'import PySide6; print("Config builder GUI ready.")'
 }
 
 create_interactive_config() {
   info "Creating a bot config."
-  cd "${INSTALL_DIR}"
-  run .venv/bin/python scripts/config-builder.py --config-dir config
+  mkdir -p "${INSTALL_DIR}/config"
+  run "${INSTALL_DIR}/.venv/bin/python" \
+    "${INSTALL_DIR}/scripts/config-builder.py" \
+    --config-dir "${INSTALL_DIR}/config"
 }
 
 create_launcher() {
