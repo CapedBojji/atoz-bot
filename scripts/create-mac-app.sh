@@ -35,11 +35,13 @@ done
 [ -f "${PROJECT_DIR}/main.py" ] || fail "main.py not found in ${PROJECT_DIR}"
 [ -f "${PROJECT_DIR}/scripts/mac-app.py" ] || fail "scripts/mac-app.py not found"
 [ -f "${PROJECT_DIR}/scripts/setup-mac.sh" ] || fail "scripts/setup-mac.sh not found"
+[ -f "${PROJECT_DIR}/scripts/bootstrap-mac-app.sh" ] || fail "scripts/bootstrap-mac-app.sh not found"
 
 CONTENTS_DIR="${APP_PATH}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 EXECUTABLE_PATH="${MACOS_DIR}/AtoZ Bot"
+PAYLOAD_DIR="${RESOURCES_DIR}/project-template"
 
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
@@ -74,11 +76,23 @@ PLIST
 
 cp "${PROJECT_DIR}/scripts/setup-mac.sh" "${RESOURCES_DIR}/setup-mac.sh"
 chmod 755 "${RESOURCES_DIR}/setup-mac.sh"
+cp "${PROJECT_DIR}/scripts/bootstrap-mac-app.sh" "${RESOURCES_DIR}/bootstrap-mac-app.sh"
+chmod 755 "${RESOURCES_DIR}/bootstrap-mac-app.sh"
+mkdir -p "${PAYLOAD_DIR}"
+rsync -a --delete \
+  --exclude '.venv' \
+  --exclude '.devenv' \
+  --exclude '__pycache__' \
+  --exclude 'config' \
+  --exclude 'app.log' \
+  --exclude '.env' \
+  --exclude 'dist' \
+  --exclude 'build' \
+  "${PROJECT_DIR}/" "${PAYLOAD_DIR}/"
 
 {
   printf '#!/usr/bin/env bash\n'
   printf 'set -Eeuo pipefail\n'
-  printf 'PROJECT_DIR=%q\n' "${PROJECT_DIR}"
   printf 'APP_PATH=%q\n' "${APP_PATH}"
   cat <<'LAUNCHER'
 
@@ -88,15 +102,18 @@ elif [ -x "/usr/local/bin/brew" ]; then
   eval "$(/usr/local/bin/brew shellenv)"
 fi
 
-PYTHON_PATH="${PROJECT_DIR}/.venv/bin/python"
-GUI_PATH="${PROJECT_DIR}/scripts/mac-app.py"
-SETUP_PATH="${APP_PATH}/Contents/Resources/setup-mac.sh"
+INSTALL_DIR="${HOME}/atoz-bot"
+PYTHON_PATH="${INSTALL_DIR}/.venv/bin/python"
+GUI_PATH="${INSTALL_DIR}/scripts/mac-app.py"
+BOOTSTRAP_PATH="${APP_PATH}/Contents/Resources/bootstrap-mac-app.sh"
+PAYLOAD_DIR="${APP_PATH}/Contents/Resources/project-template"
 LOG_DIR="${HOME}/Library/Logs"
 LAUNCH_LOG="${LOG_DIR}/AtoZ Bot Launcher.log"
 
 mkdir -p "${LOG_DIR}"
 if [ ! -x "${PYTHON_PATH}" ] || [ ! -f "${GUI_PATH}" ]; then
-  printf -v setup_command '/bin/bash %q' "${SETUP_PATH}"
+  printf -v setup_command '/bin/bash %q --payload %q --install-dir %q' \
+    "${BOOTSTRAP_PATH}" "${PAYLOAD_DIR}" "${INSTALL_DIR}"
   escaped_setup_command="${setup_command//\\/\\\\}"
   escaped_setup_command="${escaped_setup_command//\"/\\\"}"
   /usr/bin/osascript \
@@ -105,9 +122,9 @@ if [ ! -x "${PYTHON_PATH}" ] || [ ! -f "${GUI_PATH}" ]; then
   exit 1
 fi
 
-export ATOZ_INSTALL_DIR="${PROJECT_DIR}"
+export ATOZ_INSTALL_DIR="${INSTALL_DIR}"
 export ATOZ_MAC_APP_PATH="${APP_PATH}"
-cd "${PROJECT_DIR}"
+cd "${INSTALL_DIR}"
 exec "${PYTHON_PATH}" "${GUI_PATH}" >> "${LAUNCH_LOG}" 2>&1
 LAUNCHER
 } > "${EXECUTABLE_PATH}"

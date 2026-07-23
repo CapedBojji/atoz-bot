@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 REPO_URL="https://github.com/CapedBojji/atoz-bot.git"
 ARCHIVE_URL="https://github.com/CapedBojji/atoz-bot/archive/refs/heads/main.zip"
-INSTALL_DIR="${HOME}/atoz-bot"
+INSTALL_DIR="${ATOZ_INSTALL_DIR:-${HOME}/atoz-bot}"
 MAC_APP_PATH="${HOME}/Applications/AtoZ Bot.app"
 LEGACY_LAUNCHER_PATH="${HOME}/Desktop/Run AtoZ Bot.command"
 PYTHON_TOOL="python@3.12"
@@ -164,6 +164,13 @@ download_repo_archive() {
 
 clone_or_update_repo() {
   info "Preparing AtoZ Bot in ${INSTALL_DIR}."
+
+  if [ "${ATOZ_SKIP_REPO_SYNC:-no}" = "yes" ]; then
+    [ -f "${INSTALL_DIR}/main.py" ] || fail "bundled app files are missing main.py"
+    mark_installed "project:${INSTALL_DIR}"
+    info "Using bundled app files for first-run setup."
+    return
+  fi
 
   if [ -d "${INSTALL_DIR}/.git" ]; then
     run git -C "${INSTALL_DIR}" remote set-url origin "${REPO_URL}"

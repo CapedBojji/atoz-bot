@@ -8,6 +8,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CREATE_APP_SCRIPT = PROJECT_ROOT / "scripts" / "create-mac-app.sh"
+BOOTSTRAP_APP_SCRIPT = PROJECT_ROOT / "scripts" / "bootstrap-mac-app.sh"
+PACKAGE_APP_SCRIPT = PROJECT_ROOT / "scripts" / "package-mac-app.sh"
 UPDATE_SCRIPT = PROJECT_ROOT / "scripts" / "update-mac.sh"
 
 
@@ -30,6 +32,9 @@ class MacScriptTests(unittest.TestCase):
             (project / "scripts" / "setup-mac.sh").write_text(
                 "#!/bin/bash\n", encoding="utf-8"
             )
+            (project / "scripts" / "bootstrap-mac-app.sh").write_text(
+                "#!/bin/bash\n", encoding="utf-8"
+            )
 
             subprocess.run(
                 [
@@ -48,6 +53,10 @@ class MacScriptTests(unittest.TestCase):
             plist_path = app_path / "Contents" / "Info.plist"
             executable = app_path / "Contents" / "MacOS" / "AtoZ Bot"
             bundled_setup = app_path / "Contents" / "Resources" / "setup-mac.sh"
+            bundled_bootstrap = (
+                app_path / "Contents" / "Resources" / "bootstrap-mac-app.sh"
+            )
+            payload_main = app_path / "Contents" / "Resources" / "project-template" / "main.py"
             with plist_path.open("rb") as plist_file:
                 plist = plistlib.load(plist_file)
             launcher = executable.read_text(encoding="utf-8")
@@ -56,10 +65,13 @@ class MacScriptTests(unittest.TestCase):
             self.assertEqual(plist["CFBundleExecutable"], "AtoZ Bot")
             self.assertTrue(os.access(executable, os.X_OK))
             self.assertTrue(os.access(bundled_setup, os.X_OK))
-            self.assertIn(str(project), launcher)
+            self.assertTrue(os.access(bundled_bootstrap, os.X_OK))
+            self.assertTrue(payload_main.is_file())
             self.assertIn(str(app_path).replace(" ", "\\ "), launcher)
             self.assertIn('exec "${PYTHON_PATH}" "${GUI_PATH}"', launcher)
             self.assertIn('application "Terminal"', launcher)
+            self.assertIn('project-template', launcher)
+            self.assertIn('INSTALL_DIR="${HOME}/atoz-bot"', launcher)
 
     def make_update_install(
         self, temp_dir: str
@@ -167,6 +179,8 @@ exit 0
 
     def test_scripts_have_valid_shell_syntax(self):
         subprocess.run(["bash", "-n", str(CREATE_APP_SCRIPT)], check=True)
+        subprocess.run(["bash", "-n", str(BOOTSTRAP_APP_SCRIPT)], check=True)
+        subprocess.run(["bash", "-n", str(PACKAGE_APP_SCRIPT)], check=True)
         subprocess.run(["bash", "-n", str(UPDATE_SCRIPT)], check=True)
 
 
