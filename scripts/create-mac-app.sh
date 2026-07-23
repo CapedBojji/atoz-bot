@@ -93,8 +93,9 @@ rsync -a --delete \
 {
   printf '#!/usr/bin/env bash\n'
   printf 'set -Eeuo pipefail\n'
-  printf 'APP_PATH=%q\n' "${APP_PATH}"
   cat <<'LAUNCHER'
+
+APP_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 if [ -x "/opt/homebrew/bin/brew" ]; then
   eval "$(/opt/homebrew/bin/brew shellenv)"

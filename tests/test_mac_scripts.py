@@ -67,11 +67,14 @@ class MacScriptTests(unittest.TestCase):
             self.assertTrue(os.access(bundled_setup, os.X_OK))
             self.assertTrue(os.access(bundled_bootstrap, os.X_OK))
             self.assertTrue(payload_main.is_file())
-            self.assertIn(str(app_path).replace(" ", "\\ "), launcher)
             self.assertIn('exec "${PYTHON_PATH}" "${GUI_PATH}"', launcher)
             self.assertIn('application "Terminal"', launcher)
             self.assertIn('project-template', launcher)
             self.assertIn('INSTALL_DIR="${HOME}/atoz-bot"', launcher)
+            self.assertIn(
+                'APP_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"',
+                launcher,
+            )
 
     def make_update_install(
         self, temp_dir: str
